@@ -253,7 +253,14 @@ narwc_schema <- function() {
       STAGE      = "LEGSTAGE",
       ALTFT      = "ALT",
       ALTITUDEFT = "ALT",
-      HEIGHT     = "ALT",
+      # Deliberately not HEIGHT. It reads like an altitude alias, but marine
+      # survey files carry swell, wave and cloud height far more often than
+      # they carry a column called "Height" meaning the aircraft's altitude,
+      # and ALT feeds a right-angle distance downstream. Found against real
+      # survey data in msomgom, where a substring fallback made it worse:
+      # "Swell_Height_m" beat "TrkAltitude_m" to ALT.
+      AIRCRAFTALT  = "ALT",
+      TRKALTITUDE  = "ALT",
       HDG        = "HEADING",
       COURSE     = "HEADING",
       WEATHER    = "WX",

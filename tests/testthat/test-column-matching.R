@@ -196,3 +196,20 @@ test_that("a documented preference is not warned about", {
 test_that("an empty data frame is handled", {
   expect_equal(ncol(standardize_narwc_columns(data.frame(), quiet = TRUE)), 0)
 })
+
+test_that("a bare Height column is not taken for an altitude", {
+  # Regression, from real survey data via msomgom: "height" was an ALT alias,
+  # and marine survey files carry swell, wave and cloud height far more often
+  # than they carry an aircraft altitude called "Height". ALT feeds a
+  # right-angle distance, so a wrong match here fabricates distances.
+  raw <- data.frame(Height = 2.1, EVENTNO = 1, check.names = FALSE)
+  out <- suppressMessages(standardize_narwc_columns(raw))
+  expect_false("ALT" %in% names(out))
+  expect_true("Height" %in% names(out))
+})
+
+test_that("the altitude columns real survey files use are matched", {
+  raw <- data.frame(TrkAltitude = 500, EVENTNO = 1, check.names = FALSE)
+  out <- suppressMessages(standardize_narwc_columns(raw))
+  expect_equal(out$ALT, 500)
+})
