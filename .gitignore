@@ -1,0 +1,19 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+.DS_Store
+
+# R CMD build / check artefacts
+*.tar.gz
+*.Rcheck/
+inst/doc/
+
+# Left behind by knitting a vignette from the repo root rather than by
+# R CMD build; R CMD check flags both as non-standard top-level files.
+Rplots.pdf
+figure/
+
+# Claude Code
+.claude/

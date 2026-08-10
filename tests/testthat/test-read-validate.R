@@ -1,0 +1,96 @@
+test_that("LAT_DD and LONG_DD are accepted", {
+  dat <- example_data()
+  expect_true(all(c("LATITUDE", "LONGITUDE") %in% names(dat)))
+  expect_false(any(c("LAT_DD", "LONG_DD") %in% names(dat)))
+  expect_type(dat$LATITUDE, "double")
+})
+
+test_that("a canonical name is never clobbered by its alias", {
+  raw <- data.frame(
+    FILEID = "A", EVENTNO = 1, YEAR = 2024, MONTH = 4, DAY = 1, TIME = 120000,
+    LATITUDE = 43, LAT_DD = 99, LONGITUDE = -69, LEGTYPE = 2
+  )
+  dat <- read_narwc(raw)
+  expect_equal(dat$LATITUDE, 43)
+})
+
+test_that("NARWC missing-value placeholders become NA", {
+  raw <- data.frame(
+    FILEID = "A", EVENTNO = "1", YEAR = "2024", MONTH = "4", DAY = "1",
+    TIME = "120000", LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    LEGNO = ".", SPECCODE = "", stringsAsFactors = FALSE
+  )
+  dat <- read_narwc(raw)
+  expect_true(is.na(dat$LEGNO))
+  expect_true(is.na(dat$SPECCODE))
+})
+
+test_that("DATE is derived", {
+  dat <- example_data()
+  expect_s3_class(dat$DATE, "Date")
+  expect_equal(min(dat$DATE), as.Date("2024-04-01"))
+})
+
+test_that("extra columns can be carried through", {
+  raw <- data.frame(
+    FILEID = "A", EVENTNO = 1, YEAR = 2024, MONTH = 4, DAY = 1, TIME = 120000,
+    LATITUDE = 43, LONGITUDE = -69, LEGTYPE = 2, Effort_Type = "on"
+  )
+  # Dropping it is now reported; that the message happens is tested in
+  # test-profiles.R, so keep it out of the way here.
+  expect_false("Effort_Type" %in% names(suppressMessages(read_narwc(raw))))
+  expect_true("Effort_Type" %in% names(read_narwc(raw, extra_columns = "Effort_Type")))
+  expect_true("Effort_Type" %in% names(read_narwc(raw, extra_columns = NULL)))
+})
+
+test_that("a missing file is reported clearly", {
+  expect_error(read_narwc("no/such/file.csv"), "not found")
+})
+
+test_that("the bundled fixture raises nothing above a note", {
+  issues <- validate_narwc(example_data())
+  expect_setequal(issues$severity, "note")
+
+  # The one note is the line abandoned when the sea state rose, which has no
+  # end-line record. That is a property of the fixture, not a defect in it.
+  expect_equal(issues$check, "legstage_line_not_closed")
+  expect_equal(issues$n, 1L)
+})
+
+test_that("a missing required column is an error-level finding", {
+  dat <- example_data()
+  dat$LATITUDE <- NULL
+  iss <- validate_narwc(dat)
+  expect_true("missing_required" %in% iss$check)
+  expect_equal(iss$severity[iss$check == "missing_required"], "error")
+})
+
+test_that("out-of-book codes are flagged", {
+  dat <- example_data()
+  dat$LEGTYPE[1] <- 8 # not a NARWC LEGTYPE
+  dat$IDREL[!is.na(dat$IDREL)][1] <- 4
+  iss <- validate_narwc(dat)
+  expect_setequal(iss$column[iss$check == "unknown_code"], c("LEGTYPE", "IDREL"))
+})
+
+test_that("sightings at line-boundary events are flagged", {
+  dat <- example_data()
+  i <- which(dat$LEGSTAGE == 1)[1]
+  dat$SPECCODE[i] <- "RIWH"
+  iss <- validate_narwc(dat)
+  expect_true("sighting_at_boundary" %in% iss$check)
+})
+
+test_that("lost longitude sign convention is flagged", {
+  dat <- example_data()
+  dat$LONGITUDE <- abs(dat$LONGITUDE)
+  iss <- validate_narwc(dat)
+  expect_true("positive_west_longitude" %in% iss$check)
+})
+
+test_that("mis-sorted events are flagged", {
+  dat <- example_data()
+  dat$EVENTNO[10] <- 1
+  iss <- validate_narwc(dat)
+  expect_true("eventno_not_increasing" %in% iss$check)
+})

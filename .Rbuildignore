@@ -1,0 +1,12 @@
+^original$
+^data-raw$
+^docs$
+^\.DS_Store$
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.github$
+^LICENSE\.md$
+^scratch$
+^.*\.Rcheck$
+^.*\.tar\.gz$
+^\.claude$
