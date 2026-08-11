@@ -142,3 +142,35 @@ test_that("records that are part of no line stay NA", {
 test_that("quiet silences the note", {
   expect_silent(make_leg_id(occ_frame(), quiet = TRUE))
 })
+
+test_that("an occupation closes at its end-line record", {
+  d <- occ_frame(legno = "4", stage = c(1, 2, 5, NA), n = 4)
+  d$LEGTYPE <- c(2, 2, 2, 1)          # the last record is the ferry away
+  out <- make_leg_id(d, quiet = TRUE)
+  expect_equal(sum(!is.na(out$LEGNO3)), 3)
+  expect_true(is.na(out$LEGNO3[4]))
+})
+
+test_that("a line with no end-line record runs to the next occupation", {
+  d <- occ_frame(legno = "4", stage = c(1, 2, 2, 2), n = 4)
+  out <- make_leg_id(d, quiet = TRUE)
+  expect_false(anyNA(out$LEGNO3))
+})
+
+test_that("the ferry between two lines belongs to neither", {
+  a <- occ_frame(legno = "4", stage = c(1, 5), n = 2)
+  ferry <- occ_frame(legno = NA_character_, stage = NA_real_, legtype = 1, n = 3)
+  ferry$EVENTNO <- ferry$EVENTNO + 50
+  b <- occ_frame(legno = "5", stage = c(1, 5), n = 2)
+  b$EVENTNO <- b$EVENTNO + 100
+
+  out <- make_leg_id(rbind(a, ferry, b), quiet = TRUE)
+  expect_equal(sum(is.na(out$LEGNO3)), 3)
+  expect_equal(length(unique(na.omit(out$LEGNO3))), 2)
+})
+
+test_that("census track after an end-line is reported, not silently dropped", {
+  d <- occ_frame(legno = "4", stage = c(1, 5, NA), n = 3)
+  d$LEGTYPE <- 2                       # still on census after the line closed
+  expect_warning(make_leg_id(d), "coding problem")
+})

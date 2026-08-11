@@ -56,9 +56,17 @@ guessed:
 \if{html}{\out{<div class="sourceCode r">}}\preformatted{table(sub("_[0-9]+$", "", dat$LEGNO3))
 }\if{html}{\out{</div>}}
 
-An occupation never spans two days: \code{DATE} and \code{FILEID} bound it. Records
-that are not part of any line — transit out to the survey area with no
-\code{LEGNO}, no begin-line record and no census track — keep \code{LEGNO3} of \code{NA}.
+An occupation never spans two days: \code{DATE} and \code{FILEID} bound it, and it
+closes at its end-line record (\code{LEGSTAGE == 5}). Records that are not part
+of any line keep \code{LEGNO3} of \code{NA}: transit out to the survey area before the
+first line, and the ferry between one line ending and the next beginning.
+
+Closing at the end-line matters more than it sounds. Those records are
+off effort either way, so effort totals do not change — but they are still
+\emph{positions}, and a segment midpoint computed from them lands out on the
+ferry rather than on the track. On one real extract 24\% of all records sat
+after an end-line inside an occupation, almost all of it transit and
+cross-leg.
 }
 
 \examples{

@@ -229,9 +229,17 @@ flag_effort <- function(dat,
 #' table(sub("_[0-9]+$", "", dat$LEGNO3))
 #' ```
 #'
-#' An occupation never spans two days: `DATE` and `FILEID` bound it. Records
-#' that are not part of any line — transit out to the survey area with no
-#' `LEGNO`, no begin-line record and no census track — keep `LEGNO3` of `NA`.
+#' An occupation never spans two days: `DATE` and `FILEID` bound it, and it
+#' closes at its end-line record (`LEGSTAGE == 5`). Records that are not part
+#' of any line keep `LEGNO3` of `NA`: transit out to the survey area before the
+#' first line, and the ferry between one line ending and the next beginning.
+#'
+#' Closing at the end-line matters more than it sounds. Those records are
+#' off effort either way, so effort totals do not change — but they are still
+#' *positions*, and a segment midpoint computed from them lands out on the
+#' ferry rather than on the track. On one real extract 24% of all records sat
+#' after an end-line inside an occupation, almost all of it transit and
+#' cross-leg.
 #'
 #' @return `dat` with `LEGNO2` (a character copy of `LEGNO`) and `LEGNO3` added.
 #'
@@ -341,6 +349,31 @@ make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
     ifelse(occ_begin[occ], paste0("line_", occ),
            ifelse(is_line[occ], paste0("derived_", occ), NA_character_))
   )
+
+  # A line ends where the record says it ends. Everything between an end-line
+  # record and the next occupation is ferry — transit, cross-leg, off-watch —
+  # and leaving it inside the occupation puts those positions into the track,
+  # where they pull segment midpoints out along the transit and take the
+  # covariates sampled at those midpoints with them.
+  end <- !is.na(stage) & stage == 5L
+  last_end <- rep(NA_integer_, max(occ))
+  ended <- which(end)
+  if (length(ended)) {
+    last_end[occ[ended]] <- ended
+  }
+  after_end <- !is.na(last_end[occ]) & seq_len(n) > last_end[occ]
+  stranded <- sum(after_end & census)
+  dat$LEGNO3[after_end] <- NA_character_
+
+  if (stranded && !quiet) {
+    rlang::warn(paste0(
+      stranded, " census record", if (stranded > 1) "s" else "",
+      " fall after the end-line record of their occupation and are now",
+      " outside any line. LEGTYPE 2 after LEGSTAGE 5 is a coding problem -",
+      " the line was closed and then continued - and those records no longer",
+      " contribute effort."
+    ))
+  }
 
   unnamed <- sum(is.na(lab) & occ_begin)
   derived <- sum(is.na(lab) & !occ_begin & occ_census)
