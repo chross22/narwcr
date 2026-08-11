@@ -261,6 +261,20 @@ narwc_schema <- function() {
       # "Swell_Height_m" beat "TrkAltitude_m" to ALT.
       AIRCRAFTALT  = "ALT",
       TRKALTITUDE  = "ALT",
+      # The `Trk*` family is the platform's own GPS track log, as distinct from
+      # the position the observer wrote down. Where both exist the track log is
+      # the recorded truth, which is why these also appear in
+      # `narwc_preferred_source`. The `_ft` spelling is converted to metres by
+      # `narwc_unit_factors()`; `ALT` is metres throughout (handbook 8.A.1).
+      TRKLATITUDE    = "LATITUDE",
+      TRKLAT         = "LATITUDE",
+      TRKLONGITUDE   = "LONGITUDE",
+      TRKLON         = "LONGITUDE",
+      TRKLONG        = "LONGITUDE",
+      TRKALTITUDE_M  = "ALT",
+      TRKALTITUDE_FT = "ALT",
+      TRKTIME_UTC    = "TIME",
+      TRKTIME_LOCAL  = "TIME",
       HDG        = "HEADING",
       COURSE     = "HEADING",
       WEATHER    = "WX",
@@ -292,9 +306,39 @@ narwc_schema <- function() {
 narwc_alias_priority <- list(
   # GMT and UTC are the same clock, so they rank together, ahead of local.
   TIME = c("TIME_UTC", "TIMEUTC", "GMT", "TIME_GMT", "GMT_TIME",
-           "TIME_LOC", "TIMELOC", "TIME_LOCAL"),
-  DATE = c("DATE_UTC", "DATE_LOC", "DATE_LOCAL")
+           "TRKTIME_UTC", "TIME_LOC", "TIMELOC", "TIME_LOCAL",
+           "TRKTIME_LOCAL"),
+  DATE = c("DATE_UTC", "DATE_LOC", "DATE_LOCAL"),
+  # A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` is not ambiguous:
+  # take the metres one and skip a conversion that can only lose precision.
+  ALT = c("TRKALTITUDE_M", "TRKALTITUDE", "TRKALTITUDE_FT", "ALTITUDE",
+          "AIRCRAFTALT", "ALTFT", "ALTITUDEFT")
 )
+
+# Sources that outrank a canonical column *already present under its own name*.
+# This is the one exception to "the real one always wins", and it exists
+# because the exception is the honest reading of the data: a `Trk*` column is
+# the GPS track log, and a plain `LATITUDE` alongside it is the position
+# recorded for the platform, which on a vessel-and-aircraft file is not the
+# same place. Taking the plain column would silently survey the wrong track.
+#
+# The displaced column is never discarded — it is kept as `<TARGET>_ORIGINAL`
+# and the swap is warned about, because it is a decision worth seeing.
+narwc_preferred_source <- list(
+  LATITUDE  = c("TRKLATITUDE", "TRKLAT"),
+  LONGITUDE = c("TRKLONGITUDE", "TRKLON", "TRKLONG"),
+  ALT       = c("TRKALTITUDE_M", "TRKALTITUDE", "TRKALTITUDE_FT")
+)
+
+# Multipliers onto the canonical unit, keyed by canonical target and then by
+# the input column it came from. `ALT` is metres (handbook 8.A.1) and feeds
+# `perp_distance()` in distsamp, so a column named in feet that is read as
+# metres overstates every right-angle distance by a factor of 3.28.
+narwc_unit_factors <- function() {
+  list(
+    ALT = c(TRKALTITUDE_FT = 0.3048, ALTFT = 0.3048, ALTITUDEFT = 0.3048)
+  )
+}
 
 # Columns that are numeric in the NARWC schema. Everything else recognised is
 # read as character.

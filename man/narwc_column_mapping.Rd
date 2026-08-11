@@ -11,10 +11,12 @@ narwc_column_mapping(dat)
 \code{\link[=standardize_narwc_columns]{standardize_narwc_columns()}}.}
 }
 \value{
-A tibble with \code{original}, \code{standardized}, and \code{match} — the last
-either \code{"alias"} for an exact entry in the alias table or \code{"inferred"} for
-one found after normalising case and separators. Zero rows when nothing was
-renamed.
+A tibble with \code{original}, \code{standardized}, \code{match}, and \code{factor}.
+\code{match} is either \code{"alias"} for an exact entry in the alias table or
+\code{"inferred"} for one found after normalising case and separators. \code{factor}
+is the multiplier applied to reach the canonical unit — \code{0.3048} for an
+altitude that arrived in feet — and \code{NA} where the values were taken as
+they were. Zero rows when nothing was renamed.
 }
 \description{
 The record of how \code{\link[=read_narwc]{read_narwc()}} or \code{\link[=standardize_narwc_columns]{standardize_narwc_columns()}} renamed a

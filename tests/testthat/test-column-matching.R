@@ -213,3 +213,104 @@ test_that("the altitude columns real survey files use are matched", {
   out <- suppressMessages(standardize_narwc_columns(raw))
   expect_equal(out$ALT, 500)
 })
+
+# A GPS track column beside a canonical column of the same name --------------
+
+trk_base <- function() {
+  data.frame(
+    FILEID = "F", EVENTNO = "1", Year = "2024", Month = "4", Day = "1",
+    Time_UTC = "120000", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+}
+
+test_that("a Trk column outranks a canonical column of the same name", {
+  dat <- trk_base()
+  dat$TrkLatitude <- "43.5"
+  dat$LATITUDE <- "9.9"
+  dat$TrkLongitude <- "-69.5"
+  dat$LONGITUDE <- "-1.1"
+
+  out <- suppressWarnings(read_narwc(dat, quiet = TRUE))
+  expect_equal(out$LATITUDE, 43.5)
+  expect_equal(out$LONGITUDE, -69.5)
+})
+
+test_that("the displaced column is kept, not dropped", {
+  dat <- trk_base()
+  dat$TrkLatitude <- "43.5"
+  dat$LATITUDE <- "9.9"
+
+  out <- suppressWarnings(read_narwc(dat, quiet = TRUE))
+  expect_true("LATITUDE_ORIGINAL" %in% names(out))
+  expect_equal(out$LATITUDE_ORIGINAL, "9.9")
+})
+
+test_that("displacing a column warns, because it is a decision worth seeing", {
+  dat <- trk_base()
+  dat$TrkLatitude <- "43.5"
+  dat$LATITUDE <- "9.9"
+  expect_warning(read_narwc(dat, quiet = TRUE), "LATITUDE_ORIGINAL")
+})
+
+test_that("prefer_track = FALSE restores the real-one-wins rule", {
+  dat <- trk_base()
+  dat$TrkLatitude <- "43.5"
+  dat$LATITUDE <- "9.9"
+
+  out <- read_narwc(dat, prefer_track = FALSE, quiet = TRUE)
+  expect_equal(out$LATITUDE, 9.9)
+  expect_false("LATITUDE_ORIGINAL" %in% names(out))
+})
+
+test_that("with no Trk column the plain position is used as it is", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43.25"
+  dat$LONGITUDE <- "-69.25"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$LATITUDE, 43.25)
+  expect_false(any(grepl("_ORIGINAL$", names(out))))
+})
+
+# Altitude units -------------------------------------------------------------
+
+test_that("an altitude named in feet is converted to metres", {
+  dat <- trk_base()
+  dat$TrkLatitude <- "43"
+  dat$TrkLongitude <- "-69"
+  dat$TrkAltitude_ft <- "751.3"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$ALT, 751.3 * 0.3048)
+  expect_equal(narwc_column_mapping(out)$factor[
+    narwc_column_mapping(out)$standardized == "ALT"], 0.3048)
+})
+
+test_that("ALTFT is converted too, having been read as metres before", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$ALTFT <- "750"
+  expect_equal(read_narwc(dat, quiet = TRUE)$ALT, 750 * 0.3048)
+})
+
+test_that("metres beats feet when a file carries both, and is not rescaled", {
+  dat <- trk_base()
+  dat$TrkLatitude <- "43"
+  dat$TrkLongitude <- "-69"
+  dat$TrkAltitude_m <- "229"
+  dat$TrkAltitude_ft <- "751.3"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$ALT, 229)
+  expect_true(is.na(narwc_column_mapping(out)$factor[
+    narwc_column_mapping(out)$standardized == "ALT"]))
+})
+
+test_that("an altitude already in metres is left alone", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$ALT <- "229"
+  expect_equal(read_narwc(dat, quiet = TRUE)$ALT, 229)
+})

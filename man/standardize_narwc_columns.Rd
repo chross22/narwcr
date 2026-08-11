@@ -4,12 +4,15 @@
 \alias{standardize_narwc_columns}
 \title{Standardise column names onto the NARWC handbook's}
 \usage{
-standardize_narwc_columns(dat, quiet = FALSE)
+standardize_narwc_columns(dat, quiet = FALSE, prefer_track = TRUE)
 }
 \arguments{
 \item{dat}{A data frame.}
 
 \item{quiet}{Suppress the report of inferred matches. Default \code{FALSE}.}
+
+\item{prefer_track}{Let a \verb{Trk*} GPS track column take precedence over a
+canonical column of the same name. Default \code{TRUE}. See \code{\link[=read_narwc]{read_narwc()}}.}
 }
 \value{
 \code{dat} with columns renamed where a match was found.

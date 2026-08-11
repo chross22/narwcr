@@ -9,6 +9,7 @@ read_narwc(
   extra_columns = character(),
   profile = NULL,
   drop_missing_position = TRUE,
+  prefer_track = TRUE,
   quiet = FALSE,
   ...
 )
@@ -27,8 +28,13 @@ for example \code{"ccs"}. \code{NULL} (default) keeps only the handbook columns.
 \item{drop_missing_position}{Drop records with no \code{LATITUDE} or \code{LONGITUDE}.
 Default \code{TRUE}; see below.}
 
+\item{prefer_track}{Let a \verb{Trk*} GPS track column take precedence over a
+canonical column of the same name — \code{TrkLatitude} over a plain \code{LATITUDE}.
+Default \code{TRUE}; see below. \code{FALSE} restores "the column already named
+\code{LATITUDE} always wins".}
+
 \item{quiet}{Suppress the messages naming matched columns, dropped columns,
-and dropped records. Default \code{FALSE}.}
+dropped records, and unit conversions. Default \code{FALSE}.}
 
 \item{...}{Passed to \code{\link[utils:read.csv]{utils::read.csv()}} when \code{x} is a path.}
 }
@@ -86,6 +92,31 @@ announce itself: a great-circle distance from a missing position is \code{NA}, a
 the usual way of accumulating effort turns that \code{NA} into a zero. Losing the
 record visibly is better than counting it as zero distance flown.
 \code{drop_missing_position = FALSE} keeps them.
+}
+
+\section{GPS track columns}{
+
+A \verb{Trk*} column is the platform's own GPS track log. Where a file carries
+both \code{TrkLatitude} and a plain \code{LATITUDE}, they are not two spellings of one
+thing: the track log is what the receiver recorded, and the plain column is
+the position entered for the platform, which on a file covering both a vessel
+and an aircraft is a different place. The track log wins, and the displaced
+column is kept as \code{LATITUDE_ORIGINAL} rather than dropped, with a warning
+naming both. This is the only case where a column already carrying a
+canonical name does not win; \code{prefer_track = FALSE} turns it off.
+
+With no \verb{Trk*} column present nothing changes — \code{LATITUDE} and \code{LONGITUDE}
+are used exactly as they are.
+}
+
+\section{Units}{
+
+\code{ALT} is metres throughout (handbook 8.A.1), and it feeds the right-angle
+distances in \code{distsamp}. A column whose \emph{name} declares feet — \code{TrkAltitude_ft},
+\code{ALTFT}, \code{ALTITUDEFT} — is multiplied by \code{0.3048} on the way in, and the
+multiplier is recorded in the \code{factor} column of \code{\link[=narwc_column_mapping]{narwc_column_mapping()}}.
+A file carrying both \code{TrkAltitude_m} and \code{TrkAltitude_ft} uses the metres one
+and converts nothing.
 }
 
 \section{Columns that are not in the handbook}{

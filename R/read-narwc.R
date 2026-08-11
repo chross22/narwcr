@@ -42,6 +42,27 @@
 #' record visibly is better than counting it as zero distance flown.
 #' `drop_missing_position = FALSE` keeps them.
 #'
+#' @section GPS track columns:
+#' A `Trk*` column is the platform's own GPS track log. Where a file carries
+#' both `TrkLatitude` and a plain `LATITUDE`, they are not two spellings of one
+#' thing: the track log is what the receiver recorded, and the plain column is
+#' the position entered for the platform, which on a file covering both a vessel
+#' and an aircraft is a different place. The track log wins, and the displaced
+#' column is kept as `LATITUDE_ORIGINAL` rather than dropped, with a warning
+#' naming both. This is the only case where a column already carrying a
+#' canonical name does not win; `prefer_track = FALSE` turns it off.
+#'
+#' With no `Trk*` column present nothing changes — `LATITUDE` and `LONGITUDE`
+#' are used exactly as they are.
+#'
+#' @section Units:
+#' `ALT` is metres throughout (handbook 8.A.1), and it feeds the right-angle
+#' distances in `distsamp`. A column whose *name* declares feet — `TrkAltitude_ft`,
+#' `ALTFT`, `ALTITUDEFT` — is multiplied by `0.3048` on the way in, and the
+#' multiplier is recorded in the `factor` column of [narwc_column_mapping()].
+#' A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` uses the metres one
+#' and converts nothing.
+#'
 #' @section Columns that are not in the handbook:
 #' Survey programmes add their own derived columns, and a processed "ready for
 #' model" file may carry a dozen. They are not handbook Table 1 variables, so by
@@ -74,8 +95,12 @@
 #'   [narwc_profiles()].
 #' @param drop_missing_position Drop records with no `LATITUDE` or `LONGITUDE`.
 #'   Default `TRUE`; see below.
+#' @param prefer_track Let a `Trk*` GPS track column take precedence over a
+#'   canonical column of the same name — `TrkLatitude` over a plain `LATITUDE`.
+#'   Default `TRUE`; see below. `FALSE` restores "the column already named
+#'   `LATITUDE` always wins".
 #' @param quiet Suppress the messages naming matched columns, dropped columns,
-#'   and dropped records. Default `FALSE`.
+#'   dropped records, and unit conversions. Default `FALSE`.
 #' @param ... Passed to [utils::read.csv()] when `x` is a path.
 #'
 #' @return A tibble with the recognised NARWC columns, standardised names and
@@ -102,7 +127,8 @@
 #'
 #' @export
 read_narwc <- function(x, extra_columns = character(), profile = NULL,
-                       drop_missing_position = TRUE, quiet = FALSE, ...) {
+                       drop_missing_position = TRUE, prefer_track = TRUE,
+                       quiet = FALSE, ...) {
   dat <- if (is.data.frame(x)) {
     x
   } else if (is.character(x) && length(x) == 1L) {
@@ -119,14 +145,15 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 
   # 1. Resolve input columns onto the canonical names.
   aliases <- schema$aliases
-  resolved <- resolve_columns(names(dat), schema)
+  resolved <- resolve_columns(names(dat), schema, prefer_track)
   if (length(resolved$renames)) {
     names(dat)[match(names(resolved$renames), names(dat))] <-
       unname(resolved$renames)
     if (!quiet) report_renamed_columns(resolved$renames, resolved$inferred)
   }
   attr(dat, "column_mapping") <-
-    column_mapping_table(resolved$renames, resolved$inferred)
+    column_mapping_table(resolved$renames, resolved$inferred,
+                         resolved$conversions)
 
   # 2. Select the columns we recognise, plus anything explicitly requested.
   #    Dropping a column the caller may need is a real loss, so say what went.
@@ -134,7 +161,11 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     extra_columns <- unique(c(extra_columns, narwc_profiles(profile)$column))
   }
   if (!is.null(extra_columns)) {
-    keep <- c(schema$required, schema$optional,
+    # A column displaced by a GPS track column is kept without being asked for.
+    # It was in the file under a name this package recognises, and moving it
+    # aside is our doing, not the caller's — dropping it here would make
+    # `prefer_track` quietly destructive.
+    keep <- c(schema$required, schema$optional, resolved$displaced,
               expand_column_globs(extra_columns, names(dat)))
     dropped <- setdiff(names(dat), keep)
     dat <- dat[, intersect(keep, names(dat)), drop = FALSE]
@@ -160,6 +191,10 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
       dat[[nm]] <- suppressWarnings(as.numeric(dat[[nm]]))
     }
   }
+
+  # 4b. Rescale anything whose input name declared a different unit. After
+  #     step 4, because until then these columns are still character.
+  dat <- apply_unit_conversions(dat, resolved$conversions, quiet)
 
   # 5. Derive DATE when the date parts are all present.
   if (all(c("YEAR", "MONTH", "DAY") %in% names(dat)) && !"DATE" %in% names(dat)) {
@@ -202,13 +237,26 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 # nothing is renamed onto a canonical column that is already present - the
 # real one always wins. Every rename is reported, because a column name is the
 # one piece of provenance a reader has.
-resolve_columns <- function(nms, schema) {
+resolve_columns <- function(nms, schema, prefer_track = TRUE) {
   canonical <- c(schema$required, schema$optional)
   norm <- function(x) toupper(gsub("[^A-Za-z0-9]", "", x))
 
   input_norm <- norm(nms)
   taken <- nms[nms %in% canonical]
   renames <- character(0)
+
+  # The one documented exception to "the real one always wins": a GPS track
+  # column displaces a canonical column of the same name. The displaced column
+  # is renamed rather than dropped, so nothing is lost and both are readable.
+  displaced <- character(0)
+  for (target in if (prefer_track) names(narwc_preferred_source) else character(0)) {
+    if (!target %in% taken) next
+    if (!any(input_norm %in% norm(narwc_preferred_source[[target]]))) next
+    keep <- paste0(target, "_ORIGINAL")
+    if (keep %in% nms) next
+    displaced[target] <- keep
+    taken <- setdiff(taken, target)
+  }
 
   # Target, and whether reaching it took an inference. An exact alias is a
   # documented mapping; anything found only after normalising case or
@@ -240,6 +288,7 @@ resolve_columns <- function(nms, schema) {
   wants <- found[1, ]
   guessed <- found[2, ] == "TRUE"
   inferred <- logical(0)
+  conversions <- numeric(0)
 
   for (target in unique(stats::na.omit(wants))) {
     if (target %in% taken) next
@@ -269,11 +318,36 @@ resolve_columns <- function(nms, schema) {
       ))
     }
 
+    if (!is.null(displaced[target]) && !is.na(displaced[target])) {
+      rlang::warn(paste0(
+        "`", nms[pick], "` is being used as `", target, "`, and the file's own ",
+        "`", target, "` column is kept as `", displaced[[target]], "`. A ",
+        "`Trk*` column is the GPS track log; a plain `", target, "` beside it ",
+        "is the position recorded for the platform. Pass ",
+        "`prefer_track = FALSE` to keep `", target, "` as it is."
+      ))
+    }
+
+    factor_for <- narwc_unit_factors()[[target]]
+    if (!is.null(factor_for)) {
+      m <- match(norm(nms[pick]), norm(names(factor_for)))
+      if (!is.na(m)) conversions[target] <- unname(factor_for[m])
+    }
+
     renames[nms[pick]] <- target
     inferred <- c(inferred, guessed[pick])
     taken <- c(taken, target)
   }
-  list(renames = renames, inferred = inferred)
+
+  # Appended last so that `inferred` stays aligned with `renames`. A displaced
+  # column is moved aside by an explicit rule, never by an inference.
+  for (target in names(displaced)) {
+    renames[target] <- displaced[[target]]
+    inferred <- c(inferred, FALSE)
+  }
+
+  list(renames = renames, inferred = inferred, conversions = conversions,
+       displaced = unname(displaced))
 }
 
 # The whole dictionary, so a rename can be checked rather than trusted. Each
@@ -321,10 +395,12 @@ report_renamed_columns <- function(renames, inferred) {
 #' @param dat A data frame from [read_narwc()] or
 #'   [standardize_narwc_columns()].
 #'
-#' @return A tibble with `original`, `standardized`, and `match` — the last
-#'   either `"alias"` for an exact entry in the alias table or `"inferred"` for
-#'   one found after normalising case and separators. Zero rows when nothing was
-#'   renamed.
+#' @return A tibble with `original`, `standardized`, `match`, and `factor`.
+#'   `match` is either `"alias"` for an exact entry in the alias table or
+#'   `"inferred"` for one found after normalising case and separators. `factor`
+#'   is the multiplier applied to reach the canonical unit — `0.3048` for an
+#'   altitude that arrived in feet — and `NA` where the values were taken as
+#'   they were. Zero rows when nothing was renamed.
 #'
 #' @seealso [read_narwc()], [standardize_narwc_columns()]
 #'
@@ -346,12 +422,39 @@ narwc_column_mapping <- function(dat) {
 }
 
 # Build the record that travels with the data.
-column_mapping_table <- function(renames, inferred) {
+column_mapping_table <- function(renames, inferred, conversions = numeric(0)) {
+  standardized <- unname(renames)
   tibble::tibble(
     original = names(renames),
-    standardized = unname(renames),
-    match = ifelse(inferred, "inferred", "alias")
+    standardized = standardized,
+    match = ifelse(inferred, "inferred", "alias"),
+    factor = unname(conversions[match(standardized, names(conversions))])
   )
+}
+
+# Rescale the columns whose input spelling named a unit that is not the
+# canonical one. Applied after coercion, because a character column cannot be
+# multiplied and silently skipping the conversion is the failure this exists
+# to prevent.
+apply_unit_conversions <- function(dat, conversions, quiet = FALSE) {
+  for (target in names(conversions)) {
+    if (!target %in% names(dat)) next
+    if (!is.numeric(dat[[target]])) {
+      rlang::warn(paste0(
+        "`", target, "` needs converting to the canonical unit but is ",
+        class(dat[[target]])[1], ", not numeric. It has been left as it is."
+      ))
+      next
+    }
+    dat[[target]] <- dat[[target]] * conversions[[target]]
+    if (!quiet) {
+      rlang::inform(paste0(
+        "`", target, "` was multiplied by ", conversions[[target]],
+        " to reach the unit this package uses."
+      ))
+    }
+  }
+  dat
 }
 
 # Glob patterns in `extra_columns`, so `Trk*` keeps a family of columns whose
@@ -430,6 +533,8 @@ report_dropped_columns <- function(dropped) {
 #'
 #' @param dat A data frame.
 #' @param quiet Suppress the report of inferred matches. Default `FALSE`.
+#' @param prefer_track Let a `Trk*` GPS track column take precedence over a
+#'   canonical column of the same name. Default `TRUE`. See [read_narwc()].
 #'
 #' @return `dat` with columns renamed where a match was found.
 #'
@@ -441,18 +546,20 @@ report_dropped_columns <- function(dropped) {
 #' names(standardize_narwc_columns(raw, quiet = TRUE))
 #'
 #' @export
-standardize_narwc_columns <- function(dat, quiet = FALSE) {
+standardize_narwc_columns <- function(dat, quiet = FALSE, prefer_track = TRUE) {
   stopifnot(is.data.frame(dat))
   if (!ncol(dat)) {
     return(dat)
   }
-  resolved <- resolve_columns(names(dat), narwc_schema())
+  resolved <- resolve_columns(names(dat), narwc_schema(), prefer_track)
   if (length(resolved$renames)) {
     names(dat)[match(names(resolved$renames), names(dat))] <-
       unname(resolved$renames)
     if (!quiet) report_renamed_columns(resolved$renames, resolved$inferred)
   }
+  dat <- apply_unit_conversions(dat, resolved$conversions, quiet)
   attr(dat, "column_mapping") <-
-    column_mapping_table(resolved$renames, resolved$inferred)
+    column_mapping_table(resolved$renames, resolved$inferred,
+                         resolved$conversions)
   dat
 }
