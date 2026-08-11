@@ -305,9 +305,11 @@ narwc_schema <- function() {
 # so nothing would ever match on the name.
 narwc_alias_priority <- list(
   # GMT and UTC are the same clock, so they rank together, ahead of local.
-  TIME = c("TIME_UTC", "TIMEUTC", "GMT", "TIME_GMT", "GMT_TIME",
-           "TRKTIME_UTC", "TIME_LOC", "TIMELOC", "TIME_LOCAL",
-           "TRKTIME_LOCAL"),
+  # The GPS clock wins, but not across zones: a UTC column is still taken
+  # before a local one, because landing a dataset on two clocks is a worse
+  # failure than taking the observer's UTC time over the receiver's.
+  TIME = c("TRKTIME_UTC", "TIME_UTC", "TIMEUTC", "GMT", "TIME_GMT", "GMT_TIME",
+           "TRKTIME_LOCAL", "TIME_LOC", "TIMELOC", "TIME_LOCAL"),
   DATE = c("DATE_UTC", "DATE_LOC", "DATE_LOCAL"),
   # A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` is not ambiguous:
   # take the metres one and skip a conversion that can only lose precision.
@@ -327,7 +329,11 @@ narwc_alias_priority <- list(
 narwc_preferred_source <- list(
   LATITUDE  = c("TRKLATITUDE", "TRKLAT"),
   LONGITUDE = c("TRKLONGITUDE", "TRKLON", "TRKLONG"),
-  ALT       = c("TRKALTITUDE_M", "TRKALTITUDE", "TRKALTITUDE_FT")
+  ALT       = c("TRKALTITUDE_M", "TRKALTITUDE", "TRKALTITUDE_FT"),
+  # Only the UTC track clock displaces a plain `TIME`. `TrkTime_Local` would
+  # move the whole dataset onto another zone to gain the same seconds, which
+  # is not a trade this should make without being asked.
+  TIME      = "TRKTIME_UTC"
 )
 
 # Multipliers onto the canonical unit, keyed by canonical target and then by

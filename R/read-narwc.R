@@ -52,6 +52,12 @@
 #' naming both. This is the only case where a column already carrying a
 #' canonical name does not win; `prefer_track = FALSE` turns it off.
 #'
+#' The same applies to the clock: `TrkTime_UTC` is taken ahead of any other UTC
+#' spelling, and displaces a plain `TIME`. `TrkTime_Local` does not — it is
+#' preferred only among the local spellings, because moving the whole dataset
+#' onto another zone to gain the receiver's seconds is not a trade this makes
+#' unasked. UTC still comes before local either way.
+#'
 #' With no `Trk*` column present nothing changes — `LATITUDE` and `LONGITUDE`
 #' are used exactly as they are.
 #'

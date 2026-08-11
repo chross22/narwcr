@@ -314,3 +314,38 @@ test_that("an altitude already in metres is left alone", {
   dat$ALT <- "229"
   expect_equal(read_narwc(dat, quiet = TRUE)$ALT, 229)
 })
+
+# The GPS clock --------------------------------------------------------------
+
+test_that("the track clock is taken ahead of another UTC spelling", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$TrkTime_UTC <- "121500"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$TIME, 121500)
+})
+
+test_that("the track clock displaces a plain TIME column", {
+  dat <- trk_base()
+  dat$Time_UTC <- NULL
+  dat$TIME <- "120000"
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$TrkTime_UTC <- "121500"
+
+  out <- suppressWarnings(read_narwc(dat, quiet = TRUE))
+  expect_equal(out$TIME, 121500)
+  expect_equal(out$TIME_ORIGINAL, "120000")
+})
+
+test_that("a local track clock does not displace a UTC column", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$TrkTime_Local <- "081500"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$TIME, 120000)
+})
