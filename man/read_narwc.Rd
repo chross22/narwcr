@@ -128,19 +128,20 @@ Supplied rather than left as \code{NA}, because \code{make_leg_id()} sorts by \c
 number moves records out of survey order before the run-length logic that
 builds \code{LEGNO3} sees them. That does not error; it produces the wrong lines.
 
-The fill follows what \code{EVENTNO} is. It numbers an \emph{event} — the platform's
-position and status at a moment — so records of the same event share one
-number rather than each taking their own, and it increases through a
-\code{FILEID}. Records are grouped into events by \code{DATE}, \code{TIME} and position in
-the order the file already has them; an event carrying a number anywhere
-among its records lends it to the rest, which is the usual case where the
-number was written on the position row and left blank on the sightings taken
-at it. Only an event with no number at all is given one, and it is given a
-whole number that fits between its neighbours.
+The fill follows handbook 8.A.10. \code{EVENTNO} is a sequentially assigned
+record number that must increase within a file; skipped numbers are allowed
+and duplicates are not, with one exception — several sightings may share an
+event number, and then \emph{all of the non-sighting variables must be identical
+across all records}. So an event here is a run of consecutive records
+agreeing on every non-sighting variable, a number already recorded anywhere
+in that run covers the whole run, and only an event with no number at all is
+given one.
 
-Where no whole number fits, nothing conformant can be inserted, so the
-\code{FILEID} is renumbered from 1 and a warning says so. That changes
-identifiers the file already had, which is why it is never quiet.
+Where the recorded numbers leave no room for an event being inserted, the
+numbers from that point forward are increased. That is the handbook's own
+remedy — "it is usually necessary to correct the event numbers from that
+point forward in the file" — and it warns, because records elsewhere
+referring to the old numbers past that point will no longer match.
 
 Only values are supplied, never the column itself. A file with no \code{EVENTNO}
 column is missing a required variable, and inventing one would hide that.

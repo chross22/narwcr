@@ -61,6 +61,18 @@ narwc_never_fill <- function() {
   )
 }
 
+# The sighting variables of handbook 8.A.10 - the ones that may differ between
+# records sharing an event number, where every other variable may not. Not
+# exported: it exists to define what one event is, and `narwc_never_fill()` is
+# the list a caller actually reasons about.
+narwc_sighting_columns <- function() {
+  c(
+    "SPECCODE", "TAXCODE", "IDREL", "NUMBER", "NUMCALF", "SIGHTNO",
+    "STRIP", "ANGLEL", "ANGLER", "S_LAT", "S_LONG", "S_TIME", "PHOTOS",
+    "CONFIDNC", "IDSOURCE"
+  )
+}
+
 
 #' Carry survey state forward into blank rows
 #'

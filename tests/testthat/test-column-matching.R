@@ -427,11 +427,42 @@ test_that("a gap is filled with a whole number that fits between neighbours", {
   expect_true(all(out$EVENTNO == round(out$EVENTNO)))
 })
 
-test_that("no room for a whole number renumbers the FILEID, loudly", {
+test_that("no room means later numbers move up, not a renumber from 1", {
+  # Handbook 8.A.10: "correct the event numbers from that point forward".
   dat <- ev_base(3)
   dat$EVENTNO <- c("10", NA, "11")          # nothing fits between 10 and 11
 
-  expect_warning(out <- read_narwc(dat, quiet = TRUE), "renumbered from 1")
+  expect_warning(out <- read_narwc(dat, quiet = TRUE), "from that point forward")
+  expect_equal(out$EVENTNO, c(10, 11, 12))
+})
+
+test_that("skipped numbers are allowed and are left as they are", {
+  dat <- ev_base(3)
+  dat$EVENTNO <- c("10", NA, "50")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(10, 11, 50))
+})
+
+test_that("sightings at one event share its number, differing only in SIGHTNO", {
+  dat <- ev_base(2)
+  dat <- dat[c(1, 1, 2), ]                  # two sightings at one event
+  dat$SIGHTNO <- c("1", "2", NA)
+  dat$SPECCODE <- c("RIWH", "HUWH", NA)
+  dat$EVENTNO <- c("10", NA, NA)
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(10, 10, 11))
+})
+
+test_that("a differing non-sighting variable makes it a separate event", {
+  dat <- ev_base(2)
+  dat <- dat[c(1, 1, 2), ]
+  dat$SIGHTNO <- c("1", "2", NA)
+  dat$BEAUFORT <- c("2", "3", "2")          # not a sighting variable
+  dat$EVENTNO <- NA_character_
+
+  out <- read_narwc(dat, quiet = TRUE)
   expect_equal(out$EVENTNO, c(1, 2, 3))
 })
 

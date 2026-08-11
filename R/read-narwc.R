@@ -67,19 +67,20 @@
 #' number moves records out of survey order before the run-length logic that
 #' builds `LEGNO3` sees them. That does not error; it produces the wrong lines.
 #'
-#' The fill follows what `EVENTNO` is. It numbers an *event* — the platform's
-#' position and status at a moment — so records of the same event share one
-#' number rather than each taking their own, and it increases through a
-#' `FILEID`. Records are grouped into events by `DATE`, `TIME` and position in
-#' the order the file already has them; an event carrying a number anywhere
-#' among its records lends it to the rest, which is the usual case where the
-#' number was written on the position row and left blank on the sightings taken
-#' at it. Only an event with no number at all is given one, and it is given a
-#' whole number that fits between its neighbours.
+#' The fill follows handbook 8.A.10. `EVENTNO` is a sequentially assigned
+#' record number that must increase within a file; skipped numbers are allowed
+#' and duplicates are not, with one exception — several sightings may share an
+#' event number, and then *all of the non-sighting variables must be identical
+#' across all records*. So an event here is a run of consecutive records
+#' agreeing on every non-sighting variable, a number already recorded anywhere
+#' in that run covers the whole run, and only an event with no number at all is
+#' given one.
 #'
-#' Where no whole number fits, nothing conformant can be inserted, so the
-#' `FILEID` is renumbered from 1 and a warning says so. That changes
-#' identifiers the file already had, which is why it is never quiet.
+#' Where the recorded numbers leave no room for an event being inserted, the
+#' numbers from that point forward are increased. That is the handbook's own
+#' remedy — "it is usually necessary to correct the event numbers from that
+#' point forward in the file" — and it warns, because records elsewhere
+#' referring to the old numbers past that point will no longer match.
 #'
 #' Only values are supplied, never the column itself. A file with no `EVENTNO`
 #' column is missing a required variable, and inventing one would hide that.
@@ -542,10 +543,14 @@ supply_event_number <- function(dat, quiet = FALSE) {
   n_before <- sum(is.na(dat$EVENTNO))
   file_key <- if ("FILEID" %in% names(dat)) as.character(dat$FILEID) else
     rep("", nrow(dat))
-  event_cols <- intersect(c("DATE", "TIME", "LATITUDE", "LONGITUDE"),
-                          names(dat))
-  renumbered <- character(0)
-  shared <- 0L
+
+  # Handbook 8.A.10: records may share an event number only when they are
+  # multiple sightings at one event, and then "all of the non-sighting
+  # variables must be identical across all records". So an event is a run of
+  # consecutive records agreeing on every non-sighting variable.
+  event_cols <- setdiff(names(dat),
+                        c(narwc_sighting_columns(), "EVENTNO", "FILEID"))
+  shifted <- character(0)
 
   for (f in unique(file_key)) {
     i <- which(file_key == f)
@@ -557,92 +562,61 @@ supply_event_number <- function(dat, quiet = FALSE) {
       seq_along(i)
     }
 
-    # An event that has a number anywhere among its records lends it to the
-    # rest. This is the common case: the number was recorded on the position
-    # row and left blank on the sighting rows taken at it.
-    for (e in unique(ev[is.na(dat$EVENTNO[i])])) {
-      rows <- i[ev == e]
-      known <- stats::na.omit(dat$EVENTNO[rows])
-      if (length(known) && length(unique(known)) == 1L) {
-        shared <- shared + sum(is.na(dat$EVENTNO[rows]))
-        dat$EVENTNO[rows] <- known[1]
-      }
-    }
-
-    still <- unique(ev[is.na(dat$EVENTNO[i])])
-    if (!length(still)) next
-
-    # One number per event, in the order the events appear.
-    per_event <- vapply(sort(unique(ev)), function(e) {
+    groups <- unique(ev)
+    known <- vapply(groups, function(e) {
       v <- stats::na.omit(dat$EVENTNO[i][ev == e])
       if (length(v)) v[1] else NA_real_
     }, numeric(1))
 
-    filled <- fill_event_numbers(per_event)
-    if (is.null(filled)) {
-      filled <- as.numeric(seq_along(per_event))
-      renumbered <- c(renumbered, f)
-    }
-    dat$EVENTNO[i] <- filled[match(ev, sort(unique(ev)))]
+    out <- assign_event_numbers(known)
+    if (!identical(out$moved, 0L)) shifted <- c(shifted, f)
+    dat$EVENTNO[i] <- out$v[match(ev, groups)]
   }
 
   if (!quiet) {
     rlang::inform(paste0(
       "`read_narwc()` supplied ", n_before, " missing EVENTNO value",
-      if (n_before > 1) "s" else "", ", numbering events",
-      if (length(event_cols)) {
-        paste0(" by ", paste(event_cols, collapse = " + "))
-      } else "",
-      " in the order the rows were already in",
-      if (shared) {
-        paste0("; ", shared, " of them inherited the number already recorded ",
-               "for the same event")
-      } else "",
-      ". `make_eventno = FALSE` leaves them as `NA`."
+      if (n_before > 1) "s" else "",
+      ". Records agreeing on every non-sighting variable are one event and ",
+      "share a number (handbook 8.A.10); `make_eventno = FALSE` leaves them ",
+      "as `NA`."
     ))
   }
-  if (length(renumbered)) {
+  if (length(shifted)) {
     rlang::warn(paste0(
-      "No whole number was free between the existing EVENTNO values in FILEID ",
-      paste0("`", unique(renumbered), "`", collapse = ", "),
-      ", so it was renumbered from 1. EVENTNO must increase through a FILEID ",
-      "and cannot be fractional, and the numbers it had left no room. Any ",
-      "record elsewhere referring to the old numbers will no longer match."
+      "Inserting the missing event numbers in FILEID ",
+      paste0("`", unique(shifted), "`", collapse = ", "),
+      " left no free number, so the numbers from that point forward were ",
+      "increased to keep EVENTNO increasing - the correction handbook 8.A.10 ",
+      "prescribes for an inserted event. Any record elsewhere referring to ",
+      "the old numbers past that point will no longer match."
     ))
   }
   dat
 }
 
-# Whole numbers for the events that have none, keeping the ones that do and
-# staying strictly increasing. NULL when that cannot be done, which means the
-# existing numbers leave no room and the caller must renumber instead.
-fill_event_numbers <- function(v) {
-  if (all(is.na(v))) {
-    return(as.numeric(seq_along(v)))
-  }
-  known <- which(!is.na(v))
-  if (is.unsorted(v[known], strictly = TRUE)) {
-    return(NULL)
-  }
+# Handbook 8.A.10: EVENTNO "must increase sequentially within a file", skipped
+# numbers are allowed and duplicates are not. So walk the events in order,
+# keep every number that is already larger than the last one used, and give
+# an event without a number the next one free. Where a recorded number is no
+# longer free - the file left no room for the event being inserted - it moves
+# up, which is the handbook's own remedy: "it is usually necessary to correct
+# the event numbers from that point forward in the file".
+assign_event_numbers <- function(known) {
+  v <- numeric(length(known))
+  moved <- 0L
+  next_free <- 1
 
-  gaps <- split(which(is.na(v)), cumsum(!is.na(v))[is.na(v)])
-  for (run in gaps) {
-    k <- length(run)
-    lo <- if (run[1] > 1L) v[run[1] - 1L] else NA_real_
-    hi <- if (utils::tail(run, 1) < length(v)) v[utils::tail(run, 1) + 1L] else
-      NA_real_
-
-    if (is.na(lo)) {
-      if (hi - k < 1) return(NULL)
-      v[run] <- hi - (k:1)
-    } else if (is.na(hi)) {
-      v[run] <- lo + (1:k)
+  for (j in seq_along(known)) {
+    if (!is.na(known[j]) && known[j] >= next_free) {
+      v[j] <- known[j]
     } else {
-      if (hi - lo <= k) return(NULL)
-      v[run] <- lo + (1:k)
+      if (!is.na(known[j])) moved <- moved + 1L
+      v[j] <- next_free
     }
+    next_free <- v[j] + 1
   }
-  v
+  list(v = v, moved = moved)
 }
 
 # Rescale the columns whose input spelling named a unit that is not the
