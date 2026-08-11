@@ -233,7 +233,9 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
   #    the data - the failure that hid 1.4 million missing times.
   for (nm in intersect(narwc_numeric_columns, names(dat))) {
     if (is.numeric(dat[[nm]])) next
-    had <- sum(!is.na(dat[[nm]]) & nzchar(trimws(as.character(dat[[nm]]))))
+    # Blanks became NA at step 3, so a plain NA count is enough — and calling
+    # trimws() on every value of every numeric column is not free at scale.
+    had <- sum(!is.na(dat[[nm]]))
     dat[[nm]] <- if (nm %in% c("TIME", "S_TIME")) {
       parse_narwc_time(dat[[nm]])
     } else {
@@ -610,15 +612,20 @@ supply_event_number <- function(dat, quiet = FALSE) {
       seq_along(i)
     }
 
-    groups <- unique(ev)
-    known <- vapply(groups, function(e) {
-      v <- stats::na.omit(dat$EVENTNO[i][ev == e])
-      if (length(v)) v[1] else NA_real_
-    }, numeric(1))
+    # `rle_id()` numbers the events 1..k in order, so the first number
+    # recorded for each can be gathered in one pass. Scanning the file once
+    # per event instead is quadratic, and this runs on millions of records.
+    have <- dat$EVENTNO[i]
+    known <- rep(NA_real_, max(ev))
+    seen <- which(!is.na(have))
+    if (length(seen)) {
+      first <- seen[!duplicated(ev[seen])]
+      known[ev[first]] <- have[first]
+    }
 
     out <- assign_event_numbers(known)
-    if (!identical(out$moved, 0L)) shifted <- c(shifted, f)
-    dat$EVENTNO[i] <- out$v[match(ev, groups)]
+    if (out$moved > 0L) shifted <- c(shifted, f)
+    dat$EVENTNO[i] <- out$v[ev]
   }
 
   if (!quiet) {
@@ -651,20 +658,17 @@ supply_event_number <- function(dat, quiet = FALSE) {
 # up, which is the handbook's own remedy: "it is usually necessary to correct
 # the event numbers from that point forward in the file".
 assign_event_numbers <- function(known) {
-  v <- numeric(length(known))
-  moved <- 0L
-  next_free <- 1
+  j <- seq_along(known)
 
-  for (j in seq_along(known)) {
-    if (!is.na(known[j]) && known[j] >= next_free) {
-      v[j] <- known[j]
-    } else {
-      if (!is.na(known[j])) moved <- moved + 1L
-      v[j] <- next_free
-    }
-    next_free <- v[j] + 1
-  }
-  list(v = v, moved = moved)
+  # The walk written in closed form, because it runs once per event and there
+  # can be millions. Each event takes its recorded number, or the next one
+  # free after the event before it — so an event ends up at least `j`, and at
+  # least one more than any earlier number already claimed:
+  #     v[j] = j + max(0, max over i <= j of (known[i] - i))
+  a <- ifelse(is.na(known), -Inf, known)
+  v <- j + pmax(0, cummax(a - j))
+
+  list(v = v, moved = sum(!is.na(known) & v != known))
 }
 
 # Rescale the columns whose input spelling named a unit that is not the
