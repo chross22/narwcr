@@ -174,3 +174,17 @@ test_that("census track after an end-line is reported, not silently dropped", {
   d$LEGTYPE <- 2                       # still on census after the line closed
   expect_warning(make_leg_id(d), "coding problem")
 })
+
+test_that("the note counts line occupations, not every stretch", {
+  # The transit in front of the line is a stretch but not an occupation, and
+  # counting it overstates what was found.
+  transit <- occ_frame(legno = NA_character_, stage = NA_real_, legtype = 1,
+                       n = 3)
+  line <- occ_frame(legno = NA_character_, stage = c(1, 2, 5), legtype = 2,
+                    n = 3)
+  line$EVENTNO <- line$EVENTNO + 100
+
+  msg <- tryCatch(make_leg_id(rbind(transit, line)), message = conditionMessage)
+  expect_match(msg, "found 1 line occupation")
+  expect_no_match(msg, "found 2 line occupation")
+})

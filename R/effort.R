@@ -379,7 +379,10 @@ make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
   derived <- sum(is.na(lab) & !occ_begin & occ_census)
   if ((unnamed || derived) && !quiet) {
     rlang::inform(paste0(
-      "`make_leg_id()` found ", max(occ), " line occupations. ",
+      # `is_line`, not `max(occ)`: the stretches between two starts include
+      # the transit out to the survey area and the ferry between lines, and
+      # those are not occupations of anything.
+      "`make_leg_id()` found ", sum(is_line), " line occupations. ",
       if (unnamed) {
         paste0(unnamed, " have a begin-line record but no LEGNO to name them",
                " (`line_<n>`). ")
