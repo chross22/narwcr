@@ -218,6 +218,17 @@ flag_effort <- function(dat,
 #'     those occupations are named `derived_<n>` and reported.}
 #' }
 #'
+#' `LEGNO3` records which of the three an occupation came from, because they
+#' are not equally trustworthy: `4_12` was named by its line number, `line_12`
+#' has a begin-line record but no number to name it with, and `derived_12` was
+#' inferred from census track alone. Counting the records under each is the
+#' way to see how much of a dataset's line structure was read and how much was
+#' guessed:
+#'
+#' ```r
+#' table(sub("_[0-9]+$", "", dat$LEGNO3))
+#' ```
+#'
 #' An occupation never spans two days: `DATE` and `FILEID` bound it. Records
 #' that are not part of any line — transit out to the survey area with no
 #' `LEGNO`, no begin-line record and no census track — keep `LEGNO3` of `NA`.
@@ -315,21 +326,38 @@ make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
     hit[unique(occ[flag])] <- TRUE
     hit
   }
-  is_line <- !is.na(lab) | any_in_occ(begin) | any_in_occ(census)
+  occ_begin <- any_in_occ(begin)
+  occ_census <- any_in_occ(census)
+  is_line <- !is.na(lab) | occ_begin | occ_census
 
+  # Three kinds, and they are not equally trustworthy. An occupation with a
+  # LEGNO is named. One without a LEGNO but with a begin-line record is still
+  # something the observers recorded — only its number is missing, so it is
+  # `line_<n>`. One with neither was inferred from a run of census track, and
+  # `derived_<n>` says so. Calling both of the last two "derived" would hide
+  # how much of a dataset's line structure is read and how much is guessed.
   dat$LEGNO3 <- ifelse(
     !is.na(lab[occ]), paste(lab[occ], occ, sep = "_"),
-    ifelse(is_line[occ], paste0("derived_", occ), NA_character_)
+    ifelse(occ_begin[occ], paste0("line_", occ),
+           ifelse(is_line[occ], paste0("derived_", occ), NA_character_))
   )
 
-  derived <- sum(is.na(lab) & is_line)
-  if (derived && !quiet) {
+  unnamed <- sum(is.na(lab) & occ_begin)
+  derived <- sum(is.na(lab) & !occ_begin & occ_census)
+  if ((unnamed || derived) && !quiet) {
     rlang::inform(paste0(
-      "`make_leg_id()` identified ", derived, " line occupation",
-      if (derived > 1) "s" else "", " with no LEGNO to name ",
-      if (derived > 1) "them" else "it",
-      ", from begin-line records or runs of census track. ",
-      "Named `derived_<n>`; the rest keep their line number."
+      "`make_leg_id()` found ", max(occ), " line occupations. ",
+      if (unnamed) {
+        paste0(unnamed, " have a begin-line record but no LEGNO to name them",
+               " (`line_<n>`). ")
+      } else "",
+      if (derived) {
+        paste0(derived, " fall on days recording neither a LEGNO nor a ",
+               "begin-line record, and were inferred from runs of census ",
+               "track (`derived_<n>`) - that is a guess about where lines ",
+               "start and stop, not a reading of one. ")
+      } else "",
+      "The rest keep their line number."
     ))
   }
   dat

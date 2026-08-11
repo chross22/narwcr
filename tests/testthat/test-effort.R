@@ -82,3 +82,63 @@ test_that("flag_effort requires LEGTYPE", {
   dat$LEGTYPE <- NULL
   expect_error(flag_effort(dat), "LEGTYPE")
 })
+
+# What an occupation was found from -------------------------------------------
+
+occ_frame <- function(legno = NA_character_, stage = NA_real_, legtype = 2,
+                      date = "2024-04-01", n = 4) {
+  data.frame(
+    FILEID = "F", EVENTNO = seq_len(n), DATE = as.Date(date),
+    LEGNO = legno, LEGSTAGE = stage, LEGTYPE = legtype,
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("an occupation with a LEGNO keeps its line number", {
+  d <- make_leg_id(occ_frame(legno = "7", stage = c(1, 2, 2, 5)), quiet = TRUE)
+  expect_true(all(startsWith(d$LEGNO3, "7_")))
+  expect_equal(length(unique(d$LEGNO3)), 1)
+})
+
+test_that("a begin-line record with no LEGNO is line_, not derived_", {
+  d <- make_leg_id(occ_frame(stage = c(1, 2, 2, 5)), quiet = TRUE)
+  expect_true(all(startsWith(d$LEGNO3, "line_")))
+})
+
+test_that("census track with neither is derived_, and says so", {
+  expect_message(
+    d <- make_leg_id(occ_frame()),
+    "inferred from runs of census track"
+  )
+  expect_true(all(startsWith(d$LEGNO3, "derived_")))
+})
+
+test_that("a begin-line record opens a new occupation under one LEGNO", {
+  # A line flown twice under the same number: nothing about LEGNO changes,
+  # so only the begin-line record separates the two attempts.
+  d <- make_leg_id(
+    occ_frame(legno = "4", stage = c(1, 5, 1, 5), n = 4), quiet = TRUE
+  )
+  expect_equal(length(unique(d$LEGNO3)), 2)
+})
+
+test_that("an occupation never spans two days", {
+  a <- occ_frame(legno = "4", stage = c(1, 2, 2, 5), date = "2024-04-01")
+  b <- occ_frame(legno = "4", stage = c(1, 2, 2, 5), date = "2024-04-02")
+  b$EVENTNO <- b$EVENTNO + 100
+  d <- make_leg_id(rbind(a, b), quiet = TRUE)
+  expect_equal(length(unique(d$LEGNO3)), 2)
+  expect_equal(length(unique(paste(d$DATE, d$LEGNO3))), 2)
+})
+
+test_that("records that are part of no line stay NA", {
+  transit <- occ_frame(legtype = 1, n = 3)
+  line <- occ_frame(legno = "4", stage = c(1, 2, 2, 5))
+  line$EVENTNO <- line$EVENTNO + 100
+  d <- make_leg_id(rbind(transit, line), quiet = TRUE)
+  expect_equal(sum(is.na(d$LEGNO3)), 3)
+})
+
+test_that("quiet silences the note", {
+  expect_silent(make_leg_id(occ_frame(), quiet = TRUE))
+})

@@ -46,6 +46,16 @@ above. This is inference rather than a reading of what was recorded, so
 those occupations are named \verb{derived_<n>} and reported.}
 }
 
+\code{LEGNO3} records which of the three an occupation came from, because they
+are not equally trustworthy: \verb{4_12} was named by its line number, \code{line_12}
+has a begin-line record but no number to name it with, and \code{derived_12} was
+inferred from census track alone. Counting the records under each is the
+way to see how much of a dataset's line structure was read and how much was
+guessed:
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{table(sub("_[0-9]+$", "", dat$LEGNO3))
+}\if{html}{\out{</div>}}
+
 An occupation never spans two days: \code{DATE} and \code{FILEID} bound it. Records
 that are not part of any line — transit out to the survey area with no
 \code{LEGNO}, no begin-line record and no census track — keep \code{LEGNO3} of \code{NA}.
