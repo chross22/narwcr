@@ -61,6 +61,29 @@
 #' With no `Trk*` column present nothing changes — `LATITUDE` and `LONGITUDE`
 #' are used exactly as they are.
 #'
+#' @section A missing EVENTNO:
+#' Supplied rather than left as `NA`, because `make_leg_id()` sorts by `DATE`,
+#' `FILEID` and `EVENTNO`, and `order()` puts `NA` last — so a missing event
+#' number moves records out of survey order before the run-length logic that
+#' builds `LEGNO3` sees them. That does not error; it produces the wrong lines.
+#'
+#' The fill follows what `EVENTNO` is. It numbers an *event* — the platform's
+#' position and status at a moment — so records of the same event share one
+#' number rather than each taking their own, and it increases through a
+#' `FILEID`. Records are grouped into events by `DATE`, `TIME` and position in
+#' the order the file already has them; an event carrying a number anywhere
+#' among its records lends it to the rest, which is the usual case where the
+#' number was written on the position row and left blank on the sightings taken
+#' at it. Only an event with no number at all is given one, and it is given a
+#' whole number that fits between its neighbours.
+#'
+#' Where no whole number fits, nothing conformant can be inserted, so the
+#' `FILEID` is renumbered from 1 and a warning says so. That changes
+#' identifiers the file already had, which is why it is never quiet.
+#'
+#' Only values are supplied, never the column itself. A file with no `EVENTNO`
+#' column is missing a required variable, and inventing one would hide that.
+#'
 #' @section Units:
 #' `ALT` is metres throughout (handbook 8.A.1), and it feeds the right-angle
 #' distances in `distsamp`. A column whose *name* declares feet — `TrkAltitude_ft`,
@@ -105,6 +128,10 @@
 #'   canonical column of the same name — `TrkLatitude` over a plain `LATITUDE`.
 #'   Default `TRUE`; see below. `FALSE` restores "the column already named
 #'   `LATITUDE` always wins".
+#' @param make_eventno Supply the missing values of an `EVENTNO` column that
+#'   has some. Default `TRUE`; see below. `FALSE` leaves them `NA`. A file with
+#'   no `EVENTNO` column at all is left alone either way — that is a missing
+#'   required variable for [validate_narwc()] to report.
 #' @param quiet Suppress the messages naming matched columns, dropped columns,
 #'   dropped records, and unit conversions. Default `FALSE`.
 #' @param ... Passed to [utils::read.csv()] when `x` is a path.
@@ -134,7 +161,7 @@
 #' @export
 read_narwc <- function(x, extra_columns = character(), profile = NULL,
                        drop_missing_position = TRUE, prefer_track = TRUE,
-                       quiet = FALSE, ...) {
+                       make_eventno = TRUE, quiet = FALSE, ...) {
   dat <- if (is.data.frame(x)) {
     x
   } else if (is.character(x) && length(x) == 1L) {
@@ -241,6 +268,15 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     } else {
       dat$DATE <- parsed
     }
+  }
+
+  # 5b. Supply an EVENTNO where the file has none. This is not cosmetic:
+  #     `make_leg_id()` sorts by DATE, FILEID and EVENTNO, and `order()` sends
+  #     NA to the end, so a missing event number silently moves records out of
+  #     survey order before the run-length logic that builds LEGNO3 ever sees
+  #     them. The result is not an error, just the wrong lines.
+  if (make_eventno) {
+    dat <- supply_event_number(dat, quiet)
   }
 
   # 6. A record with no position cannot contribute effort or place a sighting.
@@ -470,6 +506,143 @@ column_mapping_table <- function(renames, inferred, conversions = numeric(0)) {
     match = ifelse(inferred, "inferred", "alias"),
     factor = unname(conversions[match(standardized, names(conversions))])
   )
+}
+
+# Give every record an EVENTNO, following what EVENTNO means in the handbook
+# rather than merely filling the holes.
+#
+# Two rules govern it. It numbers an *event* — the aircraft's position and
+# status at a moment — so several records of the same event share one number;
+# a sighting is tied to the event it was made from, it does not get its own.
+# And it increases through a FILEID, which is the invariant
+# `eventno_not_increasing` already checks.
+#
+# So the fill works on events, not rows: records are grouped into events by
+# date, time and position in the order the file already has them, an event
+# that carries a number anywhere among its records lends it to the rest, and
+# only an event with no number at all needs one invented. Those are given
+# whole numbers that fit between their neighbours. Where no whole number fits,
+# nothing conformant can be inserted, and the FILEID is renumbered from 1 with
+# a warning — that is a real change to existing identifiers and is not done
+# quietly.
+supply_event_number <- function(dat, quiet = FALSE) {
+  if (!nrow(dat)) {
+    if (!"EVENTNO" %in% names(dat)) dat$EVENTNO <- numeric(0)
+    return(dat)
+  }
+
+  # Only values are supplied, never the column. A file with no EVENTNO column
+  # at all is missing a required variable, which `validate_narwc()` reports —
+  # inventing one here would hide that, and would also quietly undo the rule
+  # that a near-miss spelling like `EVENTN0` is left alone rather than guessed.
+  if (!"EVENTNO" %in% names(dat) || !anyNA(dat$EVENTNO)) {
+    return(dat)
+  }
+
+  n_before <- sum(is.na(dat$EVENTNO))
+  file_key <- if ("FILEID" %in% names(dat)) as.character(dat$FILEID) else
+    rep("", nrow(dat))
+  event_cols <- intersect(c("DATE", "TIME", "LATITUDE", "LONGITUDE"),
+                          names(dat))
+  renumbered <- character(0)
+  shared <- 0L
+
+  for (f in unique(file_key)) {
+    i <- which(file_key == f)
+    ev <- if (length(event_cols)) {
+      rle_id(do.call(paste, c(
+        lapply(event_cols, function(nm) as.character(dat[[nm]][i])), sep = "\r"
+      )))
+    } else {
+      seq_along(i)
+    }
+
+    # An event that has a number anywhere among its records lends it to the
+    # rest. This is the common case: the number was recorded on the position
+    # row and left blank on the sighting rows taken at it.
+    for (e in unique(ev[is.na(dat$EVENTNO[i])])) {
+      rows <- i[ev == e]
+      known <- stats::na.omit(dat$EVENTNO[rows])
+      if (length(known) && length(unique(known)) == 1L) {
+        shared <- shared + sum(is.na(dat$EVENTNO[rows]))
+        dat$EVENTNO[rows] <- known[1]
+      }
+    }
+
+    still <- unique(ev[is.na(dat$EVENTNO[i])])
+    if (!length(still)) next
+
+    # One number per event, in the order the events appear.
+    per_event <- vapply(sort(unique(ev)), function(e) {
+      v <- stats::na.omit(dat$EVENTNO[i][ev == e])
+      if (length(v)) v[1] else NA_real_
+    }, numeric(1))
+
+    filled <- fill_event_numbers(per_event)
+    if (is.null(filled)) {
+      filled <- as.numeric(seq_along(per_event))
+      renumbered <- c(renumbered, f)
+    }
+    dat$EVENTNO[i] <- filled[match(ev, sort(unique(ev)))]
+  }
+
+  if (!quiet) {
+    rlang::inform(paste0(
+      "`read_narwc()` supplied ", n_before, " missing EVENTNO value",
+      if (n_before > 1) "s" else "", ", numbering events",
+      if (length(event_cols)) {
+        paste0(" by ", paste(event_cols, collapse = " + "))
+      } else "",
+      " in the order the rows were already in",
+      if (shared) {
+        paste0("; ", shared, " of them inherited the number already recorded ",
+               "for the same event")
+      } else "",
+      ". `make_eventno = FALSE` leaves them as `NA`."
+    ))
+  }
+  if (length(renumbered)) {
+    rlang::warn(paste0(
+      "No whole number was free between the existing EVENTNO values in FILEID ",
+      paste0("`", unique(renumbered), "`", collapse = ", "),
+      ", so it was renumbered from 1. EVENTNO must increase through a FILEID ",
+      "and cannot be fractional, and the numbers it had left no room. Any ",
+      "record elsewhere referring to the old numbers will no longer match."
+    ))
+  }
+  dat
+}
+
+# Whole numbers for the events that have none, keeping the ones that do and
+# staying strictly increasing. NULL when that cannot be done, which means the
+# existing numbers leave no room and the caller must renumber instead.
+fill_event_numbers <- function(v) {
+  if (all(is.na(v))) {
+    return(as.numeric(seq_along(v)))
+  }
+  known <- which(!is.na(v))
+  if (is.unsorted(v[known], strictly = TRUE)) {
+    return(NULL)
+  }
+
+  gaps <- split(which(is.na(v)), cumsum(!is.na(v))[is.na(v)])
+  for (run in gaps) {
+    k <- length(run)
+    lo <- if (run[1] > 1L) v[run[1] - 1L] else NA_real_
+    hi <- if (utils::tail(run, 1) < length(v)) v[utils::tail(run, 1) + 1L] else
+      NA_real_
+
+    if (is.na(lo)) {
+      if (hi - k < 1) return(NULL)
+      v[run] <- hi - (k:1)
+    } else if (is.na(hi)) {
+      v[run] <- lo + (1:k)
+    } else {
+      if (hi - lo <= k) return(NULL)
+      v[run] <- lo + (1:k)
+    }
+  }
+  v
 }
 
 # Rescale the columns whose input spelling named a unit that is not the

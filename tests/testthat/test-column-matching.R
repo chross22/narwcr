@@ -381,3 +381,90 @@ test_that("an unreadable date falls back to the parts, and says so", {
   expect_warning(out <- read_narwc(dat, quiet = TRUE), "rebuilt")
   expect_equal(out$DATE, as.Date("2024-04-01"))
 })
+
+# A missing EVENTNO -----------------------------------------------------------
+
+ev_base <- function(n = 4) {
+  data.frame(
+    FILEID = "F", EVENTNO = NA_character_,
+    Year = "2024", Month = "4", Day = "1",
+    Time_UTC = as.character(120000 + seq_len(n)),
+    LATITUDE = as.character(43 + seq_len(n) / 100),
+    LONGITUDE = "-69", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+}
+
+test_that("an entirely empty EVENTNO column is numbered from 1", {
+  out <- read_narwc(ev_base(), quiet = TRUE)
+  expect_equal(out$EVENTNO, c(1, 2, 3, 4))
+})
+
+test_that("records of one event share a number rather than each taking one", {
+  dat <- ev_base(3)
+  dat$Time_UTC[3] <- dat$Time_UTC[2]        # same event as row 2
+  dat$LATITUDE[3] <- dat$LATITUDE[2]
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(1, 2, 2))
+})
+
+test_that("a blank row inherits the number recorded for its own event", {
+  dat <- ev_base(3)
+  dat$Time_UTC[3] <- dat$Time_UTC[2]
+  dat$LATITUDE[3] <- dat$LATITUDE[2]
+  dat$EVENTNO <- c("10", "20", NA)
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(10, 20, 20))
+})
+
+test_that("a gap is filled with a whole number that fits between neighbours", {
+  dat <- ev_base(3)
+  dat$EVENTNO <- c("10", NA, "20")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(10, 11, 20))
+  expect_true(all(out$EVENTNO == round(out$EVENTNO)))
+})
+
+test_that("no room for a whole number renumbers the FILEID, loudly", {
+  dat <- ev_base(3)
+  dat$EVENTNO <- c("10", NA, "11")          # nothing fits between 10 and 11
+
+  expect_warning(out <- read_narwc(dat, quiet = TRUE), "renumbered from 1")
+  expect_equal(out$EVENTNO, c(1, 2, 3))
+})
+
+test_that("EVENTNO increases through the FILEID after filling", {
+  dat <- ev_base(5)
+  dat$EVENTNO <- c(NA, "5", NA, NA, "20")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_false(is.unsorted(out$EVENTNO, strictly = TRUE))
+  expect_true(all(out$EVENTNO == round(out$EVENTNO)))
+})
+
+test_that("numbering restarts within each FILEID", {
+  a <- ev_base(2)
+  b <- ev_base(2)
+  b$FILEID <- "G"
+  out <- read_narwc(rbind(a, b), quiet = TRUE)
+  expect_equal(out$EVENTNO, c(1, 2, 1, 2))
+})
+
+test_that("a missing EVENTNO column is not invented", {
+  dat <- ev_base()
+  dat$EVENTNO <- NULL
+  expect_false("EVENTNO" %in% names(read_narwc(dat, quiet = TRUE)))
+})
+
+test_that("make_eventno = FALSE leaves the column alone", {
+  out <- read_narwc(ev_base(), make_eventno = FALSE, quiet = TRUE)
+  expect_true(all(is.na(out$EVENTNO)))
+})
+
+test_that("an existing complete EVENTNO is untouched", {
+  dat <- ev_base(3)
+  dat$EVENTNO <- c("7", "8", "9")
+  expect_equal(read_narwc(dat, quiet = TRUE)$EVENTNO, c(7, 8, 9))
+})

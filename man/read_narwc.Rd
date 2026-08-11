@@ -10,6 +10,7 @@ read_narwc(
   profile = NULL,
   drop_missing_position = TRUE,
   prefer_track = TRUE,
+  make_eventno = TRUE,
   quiet = FALSE,
   ...
 )
@@ -32,6 +33,11 @@ Default \code{TRUE}; see below.}
 canonical column of the same name — \code{TrkLatitude} over a plain \code{LATITUDE}.
 Default \code{TRUE}; see below. \code{FALSE} restores "the column already named
 \code{LATITUDE} always wins".}
+
+\item{make_eventno}{Supply the missing values of an \code{EVENTNO} column that
+has some. Default \code{TRUE}; see below. \code{FALSE} leaves them \code{NA}. A file with
+no \code{EVENTNO} column at all is left alone either way — that is a missing
+required variable for \code{\link[=validate_narwc]{validate_narwc()}} to report.}
 
 \item{quiet}{Suppress the messages naming matched columns, dropped columns,
 dropped records, and unit conversions. Default \code{FALSE}.}
@@ -113,6 +119,31 @@ unasked. UTC still comes before local either way.
 
 With no \verb{Trk*} column present nothing changes — \code{LATITUDE} and \code{LONGITUDE}
 are used exactly as they are.
+}
+
+\section{A missing EVENTNO}{
+
+Supplied rather than left as \code{NA}, because \code{make_leg_id()} sorts by \code{DATE},
+\code{FILEID} and \code{EVENTNO}, and \code{order()} puts \code{NA} last — so a missing event
+number moves records out of survey order before the run-length logic that
+builds \code{LEGNO3} sees them. That does not error; it produces the wrong lines.
+
+The fill follows what \code{EVENTNO} is. It numbers an \emph{event} — the platform's
+position and status at a moment — so records of the same event share one
+number rather than each taking their own, and it increases through a
+\code{FILEID}. Records are grouped into events by \code{DATE}, \code{TIME} and position in
+the order the file already has them; an event carrying a number anywhere
+among its records lends it to the rest, which is the usual case where the
+number was written on the position row and left blank on the sightings taken
+at it. Only an event with no number at all is given one, and it is given a
+whole number that fits between its neighbours.
+
+Where no whole number fits, nothing conformant can be inserted, so the
+\code{FILEID} is renumbered from 1 and a warning says so. That changes
+identifiers the file already had, which is why it is never quiet.
+
+Only values are supplied, never the column itself. A file with no \code{EVENTNO}
+column is missing a required variable, and inventing one would hide that.
 }
 
 \section{Units}{
