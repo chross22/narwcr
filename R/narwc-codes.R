@@ -194,7 +194,7 @@ narwc_schema <- function() {
       "GLAREL", "GLARER", "SURFTEMP", "HEADING", "PLATFORM", "STRATUM",
       "BLOCK", "SPECCODE", "TAXCODE", "IDREL", "NUMBER", "NUMCALF",
       "SIGHTNO", "STRIP", "ANGLEL", "ANGLER", "S_LAT", "S_LONG", "S_TIME",
-      "PHOTOS", "DDSOURCE", "IDSOURCE", "CONFIDNC"
+      "PHOTOS", "DDSOURCE", "IDSOURCE", "CONFIDNC", "TRKDIST"
     ),
     aliases = c(
       LAT_DD    = "LATITUDE",
@@ -275,6 +275,14 @@ narwc_schema <- function() {
       TRKALTITUDE_FT = "ALT",
       TRKTIME_UTC    = "TIME",
       TRKTIME_LOCAL  = "TIME",
+      # Distance travelled since the previous fix, as the receiver measured it
+      # rather than as a straight line between two fixes. Not a handbook
+      # variable, but the handbook itself notes (8.A.10) that the farther
+      # apart the fixes, the less a straight line between them reconstructs
+      # the track — so where this exists it is the better measure of effort.
+      # Canonical unit is metres; the nautical-mile spelling is converted.
+      TRKDIST_M      = "TRKDIST",
+      TRKDIST_NM     = "TRKDIST",
       HDG        = "HEADING",
       COURSE     = "HEADING",
       WEATHER    = "WX",
@@ -314,7 +322,8 @@ narwc_alias_priority <- list(
   # A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` is not ambiguous:
   # take the metres one and skip a conversion that can only lose precision.
   ALT = c("TRKALTITUDE_M", "TRKALTITUDE", "TRKALTITUDE_FT", "ALTITUDE",
-          "AIRCRAFTALT", "ALTFT", "ALTITUDEFT")
+          "AIRCRAFTALT", "ALTFT", "ALTITUDEFT"),
+  TRKDIST = c("TRKDIST_M", "TRKDIST_NM")
 )
 
 # Sources that outrank a canonical column *already present under its own name*.
@@ -330,6 +339,9 @@ narwc_preferred_source <- list(
   LATITUDE  = c("TRKLATITUDE", "TRKLAT"),
   LONGITUDE = c("TRKLONGITUDE", "TRKLON", "TRKLONG"),
   ALT       = c("TRKALTITUDE_M", "TRKALTITUDE", "TRKALTITUDE_FT"),
+  # A MEMDR-era quirk rather than a GPS one, but the same shape of problem:
+  # where a file carries both, `LEGTYPE_BK` is the leg type to believe.
+  LEGTYPE   = "LEGTYPE_BK",
   # Only the UTC track clock displaces a plain `TIME`. `TrkTime_Local` would
   # move the whole dataset onto another zone to gain the same seconds, which
   # is not a trade this should make without being asked.
@@ -342,7 +354,8 @@ narwc_preferred_source <- list(
 # metres overstates every right-angle distance by a factor of 3.28.
 narwc_unit_factors <- function() {
   list(
-    ALT = c(TRKALTITUDE_FT = 0.3048, ALTFT = 0.3048, ALTITUDEFT = 0.3048)
+    ALT = c(TRKALTITUDE_FT = 0.3048, ALTFT = 0.3048, ALTITUDEFT = 0.3048),
+    TRKDIST = c(TRKDIST_NM = 1852)
   )
 }
 
@@ -353,5 +366,5 @@ narwc_numeric_columns <- c(
   "LEGTYPE", "LEGSTAGE", "LEGNO", "ALT", "BEAUFORT", "VISIBLTY", "CLOUD",
   "GLAREL", "GLARER", "SURFTEMP", "HEADING", "PLATFORM", "TAXCODE", "IDREL",
   "NUMBER", "NUMCALF", "SIGHTNO", "STRIP", "ANGLEL", "ANGLER",
-  "S_LAT", "S_LONG", "S_TIME", "PHOTOS"
+  "S_LAT", "S_LONG", "S_TIME", "PHOTOS", "TRKDIST"
 )

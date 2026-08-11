@@ -94,3 +94,52 @@ test_that("mis-sorted events are flagged", {
   iss <- validate_narwc(dat)
   expect_true("eventno_not_increasing" %in% iss$check)
 })
+
+# SIGHTNO, handbook 8.A.27 ----------------------------------------------------
+
+sightno_frame <- function() {
+  data.frame(
+    FILEID = "F", EVENTNO = 1:5, SIGHTNO = c(1, NA, 2, 3, NA),
+    SPECCODE = c("RIWH", NA, "HUWH", "FIWH", NA),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("a logger SIGHTNO with no species is flagged", {
+  dat <- sightno_frame()
+  dat$SIGHTNO[2] <- 47                    # forced record, no sighting
+  f <- validate_narwc(dat)
+  hit <- f[f$check == "sightno_without_species", ]
+  expect_equal(hit$n, 1)
+  expect_equal(hit$severity, "warning")
+})
+
+test_that("a clean file raises no SIGHTNO findings", {
+  f <- validate_narwc(sightno_frame())
+  expect_false(any(grepl("^sightno_", f$check)))
+})
+
+test_that("duplicate SIGHTNO within a FILEID is flagged", {
+  dat <- sightno_frame()
+  dat$SIGHTNO <- c(1, NA, 2, 2, NA)
+  f <- validate_narwc(dat)
+  hit <- f[f$check == "sightno_duplicated", ]
+  expect_equal(hit$n, 2)
+})
+
+test_that("the same SIGHTNO in a different FILEID is not a duplicate", {
+  dat <- rbind(sightno_frame(), sightno_frame())
+  dat$FILEID <- rep(c("F", "G"), each = 5)
+  f <- validate_narwc(dat)
+  expect_false("sightno_duplicated" %in% f$check)
+})
+
+test_that("999 is reported as non-target, and not as a duplicate", {
+  dat <- sightno_frame()
+  dat$SIGHTNO <- c(999, NA, 999, 3, NA)
+  f <- validate_narwc(dat)
+  hit <- f[f$check == "sightno_non_target", ]
+  expect_equal(hit$n, 2)
+  expect_equal(hit$severity, "note")
+  expect_false("sightno_duplicated" %in% f$check)
+})

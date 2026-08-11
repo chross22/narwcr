@@ -87,6 +87,9 @@ narwc_checks <- function() {
     time_format        = check_time_format,
     coordinates        = check_coordinates,
     sighting_counts    = check_sighting_counts,
+    sightno_without_species = check_sightno_without_species,
+    sightno_duplicated = check_sightno_duplicates,
+    sightno_non_target = check_sightno_non_target,
     exact_position     = check_exact_position,
     extra_columns      = check_extra_columns
   )
@@ -127,6 +130,20 @@ narwc_checks <- function() {
 #'   \item{`eventno_not_increasing`}{`EVENTNO` does not increase through a
 #'     `FILEID`. Repeated values are allowed — the handbook (4.2) assigns one
 #'     event several sightings — but decreases indicate mis-sorted records.}
+#'   \item{`sightno_without_species`}{`SIGHTNO` is set on records with no
+#'     `SPECCODE`. Handbook 8.A.27: data-logging programs number every forced
+#'     record — line starts, weather and altitude changes — not only sightings,
+#'     and those numbers are meant to be cleared during processing. A file that
+#'     still carries them will overcount detections.}
+#'   \item{`sightno_duplicated`}{`SIGHTNO` is repeated within a `FILEID`, which
+#'     handbook 8.A.27 does not allow and calls a recurring problem in
+#'     submitted datasets. `999` is excluded, being deliberate. Anything keyed
+#'     on `FILEID` and `SIGHTNO` will match the wrong record.}
+#'   \item{`sightno_non_target`}{`SIGHTNO` is `999`, the CETAP marker for
+#'     non-target species — seals, sharks, sunfish — recorded so they could be
+#'     removed before analysis (handbook 8.A.27). A note, not a warning: the
+#'     file is correct, and duplicates of it are expected. The analysis has to
+#'     exclude them.}
 #'   \item{`bad_time_format`}{`TIME` is not a 6-digit `hhmmss` in 24-hour form
 #'     (handbook 8.A.37). Four-digit `hhmm` times are reported separately as a
 #'     warning since they are still found in older data.}
@@ -546,4 +563,80 @@ legstage_sequence_check <- function(dat) {
     open = keep[last & stage != 5L & stage != 3L],
     dangling = keep[last & stage == 3L]
   )
+}
+
+
+# Handbook 8.A.27. SIGHTNO is "required for all sighting records ... and is not
+# allowed for non-sighting records". Data-logging programs assign one to every
+# forced record - line starts, weather changes, altitude changes - and the
+# handbook's own processing step deletes those "by searching for records where
+# SPECCODE is missing but SIGHTNO > 0". A file that still carries them has not
+# had that step run, and anything counting sighting numbers will overcount.
+check_sightno_without_species <- function(dat) {
+  if (!all(c("SIGHTNO", "SPECCODE") %in% names(dat))) {
+    return(NULL)
+  }
+
+  bad <- which(!is.na(dat$SIGHTNO) & dat$SIGHTNO > 0 &
+                 (is.na(dat$SPECCODE) | !nzchar(trimws(dat$SPECCODE))))
+
+  list(flag(
+    "sightno_without_species", "warning", "SIGHTNO", bad,
+    paste0(
+      "SIGHTNO is set on records with no SPECCODE. Data loggers number every ",
+      "forced record, not only sightings (handbook 8.A.27); those numbers are ",
+      "meant to be cleared during processing. These are not detections."
+    )
+  ))
+}
+
+# Handbook 8.A.27: "duplicate numbers within a file are not allowed", and
+# "duplicate SIGHTNOs are a recurring problem in submitted datasets". 999 is
+# excluded because it is a deliberate marker rather than a mistake, and is
+# reported separately.
+check_sightno_duplicates <- function(dat) {
+  if (!all(c("FILEID", "SIGHTNO") %in% names(dat))) {
+    return(NULL)
+  }
+
+  bad <- integer(0)
+  for (fid in unique(dat$FILEID)) {
+    idx <- which(dat$FILEID == fid & !is.na(dat$SIGHTNO) & dat$SIGHTNO != 999)
+    sn <- dat$SIGHTNO[idx]
+    # Records sharing an EVENTNO are one event with several sightings, which
+    # is the legitimate case; their SIGHTNOs must still differ from each other.
+    bad <- c(bad, idx[duplicated(sn) | duplicated(sn, fromLast = TRUE)])
+  }
+  bad <- sort(unique(bad))
+
+  list(flag(
+    "sightno_duplicated", "warning", "SIGHTNO", bad,
+    paste0(
+      "SIGHTNO is duplicated within a FILEID, which handbook 8.A.27 does not ",
+      "allow. Sightings added after the fact are the usual cause. Anything ",
+      "keyed on FILEID and SIGHTNO will match the wrong record."
+    )
+  ))
+}
+
+# Handbook 8.A.27: during CETAP, "sightings of non-target species (seals,
+# sharks, sunfish, etc.) were assigned sighting numbers of 999 to facilitate
+# removal prior to any analysis", and duplicate 999s are expected. A note, not
+# a warning - the file is correct; it is the analysis that must exclude them.
+check_sightno_non_target <- function(dat) {
+  if (!"SIGHTNO" %in% names(dat)) {
+    return(NULL)
+  }
+
+  bad <- which(!is.na(dat$SIGHTNO) & dat$SIGHTNO == 999)
+
+  list(flag(
+    "sightno_non_target", "note", "SIGHTNO", bad,
+    paste0(
+      "SIGHTNO 999 is the CETAP marker for non-target species - seals, ",
+      "sharks, sunfish - recorded so they could be removed before analysis ",
+      "(handbook 8.A.27). Duplicates of it are expected and are not an error. ",
+      "Exclude these before estimating density."
+    )
+  ))
 }

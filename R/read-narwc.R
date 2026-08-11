@@ -58,8 +58,13 @@
 #' onto another zone to gain the receiver's seconds is not a trade this makes
 #' unasked. UTC still comes before local either way.
 #'
-#' With no `Trk*` column present nothing changes — `LATITUDE` and `LONGITUDE`
-#' are used exactly as they are.
+#' `LEGTYPE_BK` displaces a plain `LEGTYPE` by the same rule. That one is a
+#' MEMDR-era data quirk rather than anything to do with a GPS, but it is the
+#' same shape of problem: where a file carries both, the `_BK` column is the
+#' leg type to believe.
+#'
+#' With none of these columns present nothing changes — `LATITUDE`,
+#' `LONGITUDE` and `LEGTYPE` are used exactly as they are.
 #'
 #' @section A missing EVENTNO:
 #' Supplied rather than left as `NA`, because `make_leg_id()` sorts by `DATE`,
@@ -125,10 +130,10 @@
 #'   [narwc_profiles()].
 #' @param drop_missing_position Drop records with no `LATITUDE` or `LONGITUDE`.
 #'   Default `TRUE`; see below.
-#' @param prefer_track Let a `Trk*` GPS track column take precedence over a
-#'   canonical column of the same name — `TrkLatitude` over a plain `LATITUDE`.
-#'   Default `TRUE`; see below. `FALSE` restores "the column already named
-#'   `LATITUDE` always wins".
+#' @param prefer_track Let a better-known source take precedence over a
+#'   canonical column of the same name — `TrkLatitude` over a plain `LATITUDE`,
+#'   and `LEGTYPE_BK` over a plain `LEGTYPE`. Default `TRUE`; see below.
+#'   `FALSE` restores "the column already named `LATITUDE` always wins".
 #' @param make_eventno Supply the missing values of an `EVENTNO` column that
 #'   has some. Default `TRUE`; see below. `FALSE` leaves them `NA`. A file with
 #'   no `EVENTNO` column at all is left alone either way — that is a missing
@@ -223,10 +228,23 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
   #    single "." does not turn a whole column into NA-with-warning.
   dat[] <- lapply(dat, blank_to_na)
 
-  # 4. Coerce the numeric NARWC variables.
+  # 4. Coerce the numeric NARWC variables. A column that had values going in
+  #    and is entirely NA coming out has been emptied by the coercion, not by
+  #    the data - the failure that hid 1.4 million missing times.
   for (nm in intersect(narwc_numeric_columns, names(dat))) {
-    if (!is.numeric(dat[[nm]])) {
-      dat[[nm]] <- suppressWarnings(as.numeric(dat[[nm]]))
+    if (is.numeric(dat[[nm]])) next
+    had <- sum(!is.na(dat[[nm]]) & nzchar(trimws(as.character(dat[[nm]]))))
+    dat[[nm]] <- if (nm %in% c("TIME", "S_TIME")) {
+      parse_narwc_time(dat[[nm]])
+    } else {
+      suppressWarnings(as.numeric(dat[[nm]]))
+    }
+    if (had && all(is.na(dat[[nm]]))) {
+      rlang::warn(paste0(
+        "`", nm, "` had ", had, " value", if (had > 1) "s" else "",
+        " but none of them could be read as a number, so the column is now ",
+        "entirely NA. Check the format it arrived in."
+      ))
     }
   }
 
@@ -398,9 +416,8 @@ resolve_columns <- function(nms, schema, prefer_track = TRUE) {
     if (!is.null(displaced[target]) && !is.na(displaced[target])) {
       rlang::warn(paste0(
         "`", nms[pick], "` is being used as `", target, "`, and the file's own ",
-        "`", target, "` column is kept as `", displaced[[target]], "`. A ",
-        "`Trk*` column is the GPS track log; a plain `", target, "` beside it ",
-        "is the position recorded for the platform. Pass ",
+        "`", target, "` column is kept as `", displaced[[target]], "`. Where a ",
+        "file carries both, `", nms[pick], "` is the one to believe. Pass ",
         "`prefer_track = FALSE` to keep `", target, "` as it is."
       ))
     }
@@ -507,6 +524,37 @@ column_mapping_table <- function(renames, inferred, conversions = numeric(0)) {
     match = ifelse(inferred, "inferred", "alias"),
     factor = unname(conversions[match(standardized, names(conversions))])
   )
+}
+
+# Handbook 8.A.37: TIME is hhmmss in 24-hour form, and that is what this
+# package stores. Real files also carry "12:34:56", "12:34", and whole
+# timestamps like "2024-04-01T12:34:56Z" - and `as.numeric()` turns every one
+# of those into NA without a word, which is how a file can arrive with a
+# perfectly good clock and come out with no times at all.
+#
+# The last clock-looking piece of the string is taken, so a bare time and a
+# full timestamp both work. Seconds are optional and default to zero.
+parse_narwc_time <- function(x) {
+  if (is.numeric(x)) {
+    return(x)
+  }
+  s <- trimws(as.character(x))
+  s[!nzchar(s)] <- NA_character_
+  out <- suppressWarnings(as.numeric(s))
+
+  clock <- is.na(out) & !is.na(s) & grepl("[0-9]{1,2}:[0-9]{2}", s)
+  if (any(clock)) {
+    hit <- regmatches(
+      s[clock],
+      regexpr("[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?", s[clock])
+    )
+    parts <- strsplit(hit, ":", fixed = TRUE)
+    out[clock] <- vapply(parts, function(p) {
+      p <- suppressWarnings(as.numeric(p))
+      p[1] * 10000 + p[2] * 100 + if (length(p) > 2 && !is.na(p[3])) p[3] else 0
+    }, numeric(1))
+  }
+  out
 }
 
 # Give every record an EVENTNO, following what EVENTNO means in the handbook

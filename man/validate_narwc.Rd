@@ -58,6 +58,20 @@ later legitimately has none.}
 \item{\code{eventno_not_increasing}}{\code{EVENTNO} does not increase through a
 \code{FILEID}. Repeated values are allowed — the handbook (4.2) assigns one
 event several sightings — but decreases indicate mis-sorted records.}
+\item{\code{sightno_without_species}}{\code{SIGHTNO} is set on records with no
+\code{SPECCODE}. Handbook 8.A.27: data-logging programs number every forced
+record — line starts, weather and altitude changes — not only sightings,
+and those numbers are meant to be cleared during processing. A file that
+still carries them will overcount detections.}
+\item{\code{sightno_duplicated}}{\code{SIGHTNO} is repeated within a \code{FILEID}, which
+handbook 8.A.27 does not allow and calls a recurring problem in
+submitted datasets. \code{999} is excluded, being deliberate. Anything keyed
+on \code{FILEID} and \code{SIGHTNO} will match the wrong record.}
+\item{\code{sightno_non_target}}{\code{SIGHTNO} is \code{999}, the CETAP marker for
+non-target species — seals, sharks, sunfish — recorded so they could be
+removed before analysis (handbook 8.A.27). A note, not a warning: the
+file is correct, and duplicates of it are expected. The analysis has to
+exclude them.}
 \item{\code{bad_time_format}}{\code{TIME} is not a 6-digit \code{hhmmss} in 24-hour form
 (handbook 8.A.37). Four-digit \code{hhmm} times are reported separately as a
 warning since they are still found in older data.}

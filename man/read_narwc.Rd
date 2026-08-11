@@ -29,10 +29,10 @@ for example \code{"ccs"}. \code{NULL} (default) keeps only the handbook columns.
 \item{drop_missing_position}{Drop records with no \code{LATITUDE} or \code{LONGITUDE}.
 Default \code{TRUE}; see below.}
 
-\item{prefer_track}{Let a \verb{Trk*} GPS track column take precedence over a
-canonical column of the same name — \code{TrkLatitude} over a plain \code{LATITUDE}.
-Default \code{TRUE}; see below. \code{FALSE} restores "the column already named
-\code{LATITUDE} always wins".}
+\item{prefer_track}{Let a better-known source take precedence over a
+canonical column of the same name — \code{TrkLatitude} over a plain \code{LATITUDE},
+and \code{LEGTYPE_BK} over a plain \code{LEGTYPE}. Default \code{TRUE}; see below.
+\code{FALSE} restores "the column already named \code{LATITUDE} always wins".}
 
 \item{make_eventno}{Supply the missing values of an \code{EVENTNO} column that
 has some. Default \code{TRUE}; see below. \code{FALSE} leaves them \code{NA}. A file with
@@ -117,8 +117,13 @@ preferred only among the local spellings, because moving the whole dataset
 onto another zone to gain the receiver's seconds is not a trade this makes
 unasked. UTC still comes before local either way.
 
-With no \verb{Trk*} column present nothing changes — \code{LATITUDE} and \code{LONGITUDE}
-are used exactly as they are.
+\code{LEGTYPE_BK} displaces a plain \code{LEGTYPE} by the same rule. That one is a
+MEMDR-era data quirk rather than anything to do with a GPS, but it is the
+same shape of problem: where a file carries both, the \verb{_BK} column is the
+leg type to believe.
+
+With none of these columns present nothing changes — \code{LATITUDE},
+\code{LONGITUDE} and \code{LEGTYPE} are used exactly as they are.
 }
 
 \section{A missing EVENTNO}{

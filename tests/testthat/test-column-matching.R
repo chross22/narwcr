@@ -499,3 +499,116 @@ test_that("an existing complete EVENTNO is untouched", {
   dat$EVENTNO <- c("7", "8", "9")
   expect_equal(read_narwc(dat, quiet = TRUE)$EVENTNO, c(7, 8, 9))
 })
+
+# TrkDist, the receiver's own measured distance --------------------------------
+
+test_that("TrkDist_m is carried through as TRKDIST in metres", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkDist_m <- c("0", "850")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$TRKDIST, c(0, 850))
+})
+
+test_that("TrkDist_nm is converted to metres", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkDist_nm <- c("0", "1")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$TRKDIST, c(0, 1852))
+  expect_equal(narwc_column_mapping(out)$factor[
+    narwc_column_mapping(out)$standardized == "TRKDIST"], 1852)
+})
+
+test_that("metres wins over nautical miles when a file has both", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkDist_m <- c("0", "1852")
+  dat$TrkDist_nm <- c("0", "1")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$TRKDIST, c(0, 1852))
+  expect_true(is.na(narwc_column_mapping(out)$factor[
+    narwc_column_mapping(out)$standardized == "TRKDIST"]))
+})
+
+# TIME arriving as a clock rather than hhmmss ---------------------------------
+
+time_frame <- function(v) {
+  data.frame(
+    FILEID = "F", EVENTNO = "1", Year = "2024", Month = "4", Day = "1",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2", TrkTime_UTC = v,
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("a clock-format time is read rather than silently emptied", {
+  expect_equal(read_narwc(time_frame("12:00:00"), quiet = TRUE)$TIME, 120000)
+  expect_equal(read_narwc(time_frame("09:05:03"), quiet = TRUE)$TIME, 90503)
+})
+
+test_that("seconds are optional", {
+  expect_equal(read_narwc(time_frame("12:34"), quiet = TRUE)$TIME, 123400)
+})
+
+test_that("a full timestamp yields its time part", {
+  expect_equal(read_narwc(time_frame("2024-04-01 12:00:00"), quiet = TRUE)$TIME,
+               120000)
+  expect_equal(read_narwc(time_frame("2024-04-01T12:00:00Z"), quiet = TRUE)$TIME,
+               120000)
+})
+
+test_that("a plain hhmmss is untouched", {
+  expect_equal(read_narwc(time_frame("120000"), quiet = TRUE)$TIME, 120000)
+})
+
+test_that("emptying a column by coercion is warned about, not silent", {
+  dat <- time_frame("120000")
+  dat$BEAUFORT <- "calm-ish"
+  expect_warning(read_narwc(dat, quiet = TRUE), "entirely NA")
+})
+
+test_that("a column that was already empty is not warned about", {
+  dat <- time_frame("120000")
+  dat$BEAUFORT <- NA_character_
+  expect_no_warning(read_narwc(dat, quiet = TRUE))
+})
+
+# LEGTYPE_BK, a MEMDR data quirk ----------------------------------------------
+
+test_that("LEGTYPE_BK takes precedence over a plain LEGTYPE", {
+  dat <- time_frame("120000")
+  dat$LEGTYPE <- "9"
+  dat$LEGTYPE_BK <- "2"
+
+  out <- suppressWarnings(read_narwc(dat, quiet = TRUE))
+  expect_equal(out$LEGTYPE, 2)
+  expect_equal(out$LEGTYPE_ORIGINAL, "9")
+})
+
+test_that("the LEGTYPE swap warns like the others", {
+  dat <- time_frame("120000")
+  dat$LEGTYPE <- "9"
+  dat$LEGTYPE_BK <- "2"
+  expect_warning(read_narwc(dat, quiet = TRUE), "LEGTYPE_ORIGINAL")
+})
+
+test_that("LEGTYPE_BK alone still maps to LEGTYPE", {
+  dat <- time_frame("120000")
+  dat$LEGTYPE <- NULL
+  dat$LEGTYPE_BK <- "2"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$LEGTYPE, 2)
+  expect_false("LEGTYPE_ORIGINAL" %in% names(out))
+})
+
+test_that("prefer_track = FALSE restores LEGTYPE too", {
+  dat <- time_frame("120000")
+  dat$LEGTYPE <- "9"
+  dat$LEGTYPE_BK <- "2"
+
+  expect_equal(read_narwc(dat, prefer_track = FALSE, quiet = TRUE)$LEGTYPE, 9)
+})
