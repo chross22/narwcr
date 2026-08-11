@@ -9,7 +9,7 @@ read_narwc(
   extra_columns = character(),
   profile = NULL,
   drop_missing_position = TRUE,
-  prefer_track = TRUE,
+  prefer_source = TRUE,
   make_eventno = TRUE,
   quiet = FALSE,
   ...
@@ -29,7 +29,7 @@ for example \code{"ccs"}. \code{NULL} (default) keeps only the handbook columns.
 \item{drop_missing_position}{Drop records with no \code{LATITUDE} or \code{LONGITUDE}.
 Default \code{TRUE}; see below.}
 
-\item{prefer_track}{Let a better-known source take precedence over a
+\item{prefer_source}{Let a better-known source take precedence over a
 canonical column of the same name — \code{TrkLatitude} over a plain \code{LATITUDE},
 and \code{LEGTYPE_BK} over a plain \code{LEGTYPE}. Default \code{TRUE}; see below.
 \code{FALSE} restores "the column already named \code{LATITUDE} always wins".}
@@ -109,7 +109,7 @@ the position entered for the platform, which on a file covering both a vessel
 and an aircraft is a different place. The track log wins, and the displaced
 column is kept as \code{LATITUDE_ORIGINAL} rather than dropped, with a warning
 naming both. This is the only case where a column already carrying a
-canonical name does not win; \code{prefer_track = FALSE} turns it off.
+canonical name does not win; \code{prefer_source = FALSE} turns it off.
 
 The same applies to the clock: \code{TrkTime_UTC} is taken ahead of any other UTC
 spelling, and displaces a plain \code{TIME}. \code{TrkTime_Local} does not — it is

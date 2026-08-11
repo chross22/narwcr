@@ -50,7 +50,7 @@
 #' and an aircraft is a different place. The track log wins, and the displaced
 #' column is kept as `LATITUDE_ORIGINAL` rather than dropped, with a warning
 #' naming both. This is the only case where a column already carrying a
-#' canonical name does not win; `prefer_track = FALSE` turns it off.
+#' canonical name does not win; `prefer_source = FALSE` turns it off.
 #'
 #' The same applies to the clock: `TrkTime_UTC` is taken ahead of any other UTC
 #' spelling, and displaces a plain `TIME`. `TrkTime_Local` does not — it is
@@ -130,7 +130,7 @@
 #'   [narwc_profiles()].
 #' @param drop_missing_position Drop records with no `LATITUDE` or `LONGITUDE`.
 #'   Default `TRUE`; see below.
-#' @param prefer_track Let a better-known source take precedence over a
+#' @param prefer_source Let a better-known source take precedence over a
 #'   canonical column of the same name — `TrkLatitude` over a plain `LATITUDE`,
 #'   and `LEGTYPE_BK` over a plain `LEGTYPE`. Default `TRUE`; see below.
 #'   `FALSE` restores "the column already named `LATITUDE` always wins".
@@ -166,7 +166,7 @@
 #'
 #' @export
 read_narwc <- function(x, extra_columns = character(), profile = NULL,
-                       drop_missing_position = TRUE, prefer_track = TRUE,
+                       drop_missing_position = TRUE, prefer_source = TRUE,
                        make_eventno = TRUE, quiet = FALSE, ...) {
   dat <- if (is.data.frame(x)) {
     x
@@ -184,7 +184,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 
   # 1. Resolve input columns onto the canonical names.
   aliases <- schema$aliases
-  resolved <- resolve_columns(names(dat), schema, prefer_track)
+  resolved <- resolve_columns(names(dat), schema, prefer_source)
   if (length(resolved$renames)) {
     names(dat)[match(names(resolved$renames), names(dat))] <-
       unname(resolved$renames)
@@ -203,7 +203,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     # A column displaced by a GPS track column is kept without being asked for.
     # It was in the file under a name this package recognises, and moving it
     # aside is our doing, not the caller's — dropping it here would make
-    # `prefer_track` quietly destructive.
+    # `prefer_source` quietly destructive.
     # `DATE` is not a handbook Table 1 variable — the handbook carries YEAR,
     # MONTH and DAY — but a file that supplies `Date_UTC` has told us the date
     # on a known clock, and dropping it here meant falling back to rebuilding
@@ -332,7 +332,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 # nothing is renamed onto a canonical column that is already present - the
 # real one always wins. Every rename is reported, because a column name is the
 # one piece of provenance a reader has.
-resolve_columns <- function(nms, schema, prefer_track = TRUE) {
+resolve_columns <- function(nms, schema, prefer_source = TRUE) {
   canonical <- c(schema$required, schema$optional)
   norm <- function(x) toupper(gsub("[^A-Za-z0-9]", "", x))
 
@@ -344,7 +344,7 @@ resolve_columns <- function(nms, schema, prefer_track = TRUE) {
   # column displaces a canonical column of the same name. The displaced column
   # is renamed rather than dropped, so nothing is lost and both are readable.
   displaced <- character(0)
-  for (target in if (prefer_track) names(narwc_preferred_source) else character(0)) {
+  for (target in if (prefer_source) names(narwc_preferred_source) else character(0)) {
     if (!target %in% taken) next
     if (!any(input_norm %in% norm(narwc_preferred_source[[target]]))) next
     keep <- paste0(target, "_ORIGINAL")
@@ -418,7 +418,7 @@ resolve_columns <- function(nms, schema, prefer_track = TRUE) {
         "`", nms[pick], "` is being used as `", target, "`, and the file's own ",
         "`", target, "` column is kept as `", displaced[[target]], "`. Where a ",
         "file carries both, `", nms[pick], "` is the one to believe. Pass ",
-        "`prefer_track = FALSE` to keep `", target, "` as it is."
+        "`prefer_source = FALSE` to keep `", target, "` as it is."
       ))
     }
 
@@ -768,7 +768,7 @@ report_dropped_columns <- function(dropped) {
 #'
 #' @param dat A data frame.
 #' @param quiet Suppress the report of inferred matches. Default `FALSE`.
-#' @param prefer_track Let a `Trk*` GPS track column take precedence over a
+#' @param prefer_source Let a `Trk*` GPS track column take precedence over a
 #'   canonical column of the same name. Default `TRUE`. See [read_narwc()].
 #'
 #' @return `dat` with columns renamed where a match was found.
@@ -781,12 +781,12 @@ report_dropped_columns <- function(dropped) {
 #' names(standardize_narwc_columns(raw, quiet = TRUE))
 #'
 #' @export
-standardize_narwc_columns <- function(dat, quiet = FALSE, prefer_track = TRUE) {
+standardize_narwc_columns <- function(dat, quiet = FALSE, prefer_source = TRUE) {
   stopifnot(is.data.frame(dat))
   if (!ncol(dat)) {
     return(dat)
   }
-  resolved <- resolve_columns(names(dat), narwc_schema(), prefer_track)
+  resolved <- resolve_columns(names(dat), narwc_schema(), prefer_source)
   if (length(resolved$renames)) {
     names(dat)[match(names(resolved$renames), names(dat))] <-
       unname(resolved$renames)

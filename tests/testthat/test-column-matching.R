@@ -252,12 +252,12 @@ test_that("displacing a column warns, because it is a decision worth seeing", {
   expect_warning(read_narwc(dat, quiet = TRUE), "LATITUDE_ORIGINAL")
 })
 
-test_that("prefer_track = FALSE restores the real-one-wins rule", {
+test_that("prefer_source = FALSE restores the real-one-wins rule", {
   dat <- trk_base()
   dat$TrkLatitude <- "43.5"
   dat$LATITUDE <- "9.9"
 
-  out <- read_narwc(dat, prefer_track = FALSE, quiet = TRUE)
+  out <- read_narwc(dat, prefer_source = FALSE, quiet = TRUE)
   expect_equal(out$LATITUDE, 9.9)
   expect_false("LATITUDE_ORIGINAL" %in% names(out))
 })
@@ -605,10 +605,10 @@ test_that("LEGTYPE_BK alone still maps to LEGTYPE", {
   expect_false("LEGTYPE_ORIGINAL" %in% names(out))
 })
 
-test_that("prefer_track = FALSE restores LEGTYPE too", {
+test_that("prefer_source = FALSE restores LEGTYPE too", {
   dat <- time_frame("120000")
   dat$LEGTYPE <- "9"
   dat$LEGTYPE_BK <- "2"
 
-  expect_equal(read_narwc(dat, prefer_track = FALSE, quiet = TRUE)$LEGTYPE, 9)
+  expect_equal(read_narwc(dat, prefer_source = FALSE, quiet = TRUE)$LEGTYPE, 9)
 })
