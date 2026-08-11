@@ -171,7 +171,11 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     # It was in the file under a name this package recognises, and moving it
     # aside is our doing, not the caller's — dropping it here would make
     # `prefer_track` quietly destructive.
-    keep <- c(schema$required, schema$optional, resolved$displaced,
+    # `DATE` is not a handbook Table 1 variable — the handbook carries YEAR,
+    # MONTH and DAY — but a file that supplies `Date_UTC` has told us the date
+    # on a known clock, and dropping it here meant falling back to rebuilding
+    # the date from three columns that may be on a different one.
+    keep <- c(schema$required, schema$optional, "DATE", resolved$displaced,
               expand_column_globs(extra_columns, names(dat)))
     dropped <- setdiff(names(dat), keep)
     dat <- dat[, intersect(keep, names(dat)), drop = FALSE]
@@ -203,10 +207,40 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
   dat <- apply_unit_conversions(dat, resolved$conversions, quiet)
 
   # 5. Derive DATE when the date parts are all present.
-  if (all(c("YEAR", "MONTH", "DAY") %in% names(dat)) && !"DATE" %in% names(dat)) {
-    dat$DATE <- as.Date(sprintf("%04d-%02d-%02d", dat$YEAR, dat$MONTH, dat$DAY))
-  } else if ("DATE" %in% names(dat) && !inherits(dat$DATE, "Date")) {
-    dat$DATE <- as.Date(dat$DATE)
+  parts <- all(c("YEAR", "MONTH", "DAY") %in% names(dat))
+  from_parts <- function() {
+    as.Date(sprintf("%04d-%02d-%02d", dat$YEAR, dat$MONTH, dat$DAY))
+  }
+
+  if (!"DATE" %in% names(dat)) {
+    if (parts) dat$DATE <- from_parts()
+  } else if (!inherits(dat$DATE, "Date")) {
+    # A supplied date column can be in a format `as.Date()` will not take. That
+    # is a reason to fall back to the date parts, not to fail the whole read —
+    # but it has to be said out loud, because the parts may be on another clock.
+    parsed <- suppressWarnings(as.Date(dat$DATE))
+
+    # `as.Date()` does not reliably fail on a format it cannot read: it tries
+    # "%Y/%m/%d" too, so "4/2/2024" is taken as the year 4 rather than
+    # rejected. Checking the parsed year against the file's own `YEAR` catches
+    # that, and tolerates a one-year gap so a genuine UTC-to-local difference
+    # across New Year is not mistaken for garbage.
+    unreadable <- all(is.na(parsed)) && any(!is.na(dat$DATE))
+    if (!unreadable && parts) {
+      off <- abs(as.integer(format(parsed, "%Y")) - dat$YEAR)
+      unreadable <- any(!is.na(off) & off > 1)
+    }
+
+    if (unreadable && parts) {
+      rlang::warn(paste0(
+        "The `DATE` column could not be read as a date, so it has been ",
+        "rebuilt from `YEAR`, `MONTH` and `DAY`. If those are on a different ",
+        "clock from `TIME`, dates near midnight will be wrong."
+      ))
+      dat$DATE <- from_parts()
+    } else {
+      dat$DATE <- parsed
+    }
   }
 
   # 6. A record with no position cannot contribute effort or place a sighting.

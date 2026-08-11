@@ -349,3 +349,35 @@ test_that("a local track clock does not displace a UTC column", {
   out <- read_narwc(dat, quiet = TRUE)
   expect_equal(out$TIME, 120000)
 })
+
+# DATE ------------------------------------------------------------------------
+
+test_that("a supplied date column survives instead of being rebuilt", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$Date_UTC <- "2024-04-02"          # deliberately disagrees with Y/M/D
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_s3_class(out$DATE, "Date")
+  expect_equal(out$DATE, as.Date("2024-04-02"))
+})
+
+test_that("the date is still derived when no date column is supplied", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$DATE, as.Date("2024-04-01"))
+})
+
+test_that("an unreadable date falls back to the parts, and says so", {
+  dat <- trk_base()
+  dat$LATITUDE <- "43"
+  dat$LONGITUDE <- "-69"
+  dat$Date_UTC <- "4/2/2024"
+
+  expect_warning(out <- read_narwc(dat, quiet = TRUE), "rebuilt")
+  expect_equal(out$DATE, as.Date("2024-04-01"))
+})
