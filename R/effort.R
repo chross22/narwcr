@@ -200,6 +200,27 @@ flag_effort <- function(dat,
 #' @param dat A data frame with a `LEGNO` column, in survey order.
 #' @param sort Sort by `DATE`, `FILEID`, and `EVENTNO` first? Default `TRUE`.
 #'   Run-length identification is meaningless on unsorted records.
+#' @param quiet Suppress the note naming how many occupations had no `LEGNO`
+#'   to be identified by. Default `FALSE`.
+#'
+#' @section How an occupation is found:
+#' Three signals, taken in that order and judged per survey day, because one
+#' part of a file may record line numbers where another records only
+#' begin-line events.
+#'
+#' \describe{
+#'   \item{A begin-line record}{`LEGSTAGE == 1` always opens an occupation.
+#'     Without this a line flown twice under one number is silently a single
+#'     occupation, since nothing about `LEGNO` changes between the two.}
+#'   \item{A change of `LEGNO`}{Opens an occupation, as it always has.}
+#'   \item{A run of census track}{Only where the day records neither of the
+#'     above. This is inference rather than a reading of what was recorded, so
+#'     those occupations are named `derived_<n>` and reported.}
+#' }
+#'
+#' An occupation never spans two days: `DATE` and `FILEID` bound it. Records
+#' that are not part of any line — transit out to the survey area with no
+#' `LEGNO`, no begin-line record and no census track — keep `LEGNO3` of `NA`.
 #'
 #' @return `dat` with `LEGNO2` (a character copy of `LEGNO`) and `LEGNO3` added.
 #'
@@ -214,7 +235,7 @@ flag_effort <- function(dat,
 #' unique(dat$LEGNO3)
 #'
 #' @export
-make_leg_id <- function(dat, sort = TRUE) {
+make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
   require_columns(dat, "LEGNO")
 
   if (is_empty_df(dat)) {
@@ -231,8 +252,86 @@ make_leg_id <- function(dat, sort = TRUE) {
   }
 
   dat$LEGNO2 <- as.character(dat$LEGNO)
-  dat$LEGNO3 <- paste(dat$LEGNO2, rle_id(dat$LEGNO2), sep = "_")
-  dat$LEGNO3[is.na(dat$LEGNO2)] <- NA_character_
+  n <- nrow(dat)
+
+  day_cols <- intersect(c("DATE", "FILEID"), names(dat))
+  day <- if (length(day_cols)) {
+    do.call(paste, c(lapply(day_cols, function(nm) as.character(dat[[nm]])),
+                     sep = "\r"))
+  } else {
+    rep("", n)
+  }
+
+  stage <- if ("LEGSTAGE" %in% names(dat)) {
+    suppressWarnings(as.integer(dat$LEGSTAGE))
+  } else {
+    rep(NA_integer_, n)
+  }
+  census <- if ("LEGTYPE" %in% names(dat)) {
+    !is.na(dat$LEGTYPE) & dat$LEGTYPE == 2
+  } else {
+    rep(FALSE, n)
+  }
+
+  # Which signal a day carries decides how its occupations are found. A day is
+  # judged on its own: one part of a file may record line numbers while another
+  # records only begin-line events.
+  begin <- !is.na(stage) & stage == 1L
+  has_begin <- day %in% unique(day[begin])
+  has_legno <- day %in% unique(day[!is.na(dat$LEGNO2)])
+
+  changed <- function(x) c(TRUE, x[-1] != x[-n] | xor(is.na(x[-1]), is.na(x[-n])))
+  new_day <- c(TRUE, day[-1] != day[-n])
+
+  start <- new_day |
+    # A begin-line record always opens an occupation. Without this a line
+    # flown twice under one number is silently a single occupation, because
+    # nothing about LEGNO changes between them.
+    (has_begin & begin) |
+    (has_legno & changed(dat$LEGNO2) & !is.na(dat$LEGNO2)) |
+    # Neither recorded: a run of census records is the only remaining
+    # evidence of where a line starts and stops.
+    (!has_begin & !has_legno & census & c(TRUE, !census[-n]))
+  start[is.na(start)] <- FALSE
+
+  occ <- cumsum(start)
+
+  # One label per occupation, from the first line number recorded anywhere in
+  # it, so LEGNO3 is constant across an occupation even where LEGNO is not.
+  lab <- rep(NA_character_, max(occ))
+  seen <- which(!is.na(dat$LEGNO2))
+  if (length(seen)) {
+    first <- seen[!duplicated(occ[seen])]
+    lab[occ[first]] <- dat$LEGNO2[first]
+  }
+
+  # Not every stretch between two starts is a line. Records before the day's
+  # first line — transit out to the survey area, with no LEGNO, no begin-line
+  # record and no census record — are not an occupation of anything, and stay
+  # NA as they always have. Only a stretch with some evidence of a line gets
+  # an identifier.
+  any_in_occ <- function(flag) {
+    hit <- rep(FALSE, max(occ))
+    hit[unique(occ[flag])] <- TRUE
+    hit
+  }
+  is_line <- !is.na(lab) | any_in_occ(begin) | any_in_occ(census)
+
+  dat$LEGNO3 <- ifelse(
+    !is.na(lab[occ]), paste(lab[occ], occ, sep = "_"),
+    ifelse(is_line[occ], paste0("derived_", occ), NA_character_)
+  )
+
+  derived <- sum(is.na(lab) & is_line)
+  if (derived && !quiet) {
+    rlang::inform(paste0(
+      "`make_leg_id()` identified ", derived, " line occupation",
+      if (derived > 1) "s" else "", " with no LEGNO to name ",
+      if (derived > 1) "them" else "it",
+      ", from begin-line records or runs of census track. ",
+      "Named `derived_<n>`; the rest keep their line number."
+    ))
+  }
   dat
 }
 

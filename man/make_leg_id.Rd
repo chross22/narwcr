@@ -4,13 +4,16 @@
 \alias{make_leg_id}
 \title{Identify separate occupations of a survey line}
 \usage{
-make_leg_id(dat, sort = TRUE)
+make_leg_id(dat, sort = TRUE, quiet = FALSE)
 }
 \arguments{
 \item{dat}{A data frame with a \code{LEGNO} column, in survey order.}
 
 \item{sort}{Sort by \code{DATE}, \code{FILEID}, and \code{EVENTNO} first? Default \code{TRUE}.
 Run-length identification is meaningless on unsorted records.}
+
+\item{quiet}{Suppress the note naming how many occupations had no \code{LEGNO}
+to be identified by. Default \code{FALSE}.}
 }
 \value{
 \code{dat} with \code{LEGNO2} (a character copy of \code{LEGNO}) and \code{LEGNO3} added.
@@ -27,6 +30,27 @@ point-to-point distance across the gap, joining the end of the first stretch
 to the start of the second. \code{LEGNO3} pastes \code{LEGNO} together with a
 run-length index so the two stretches stay separate.
 }
+\section{How an occupation is found}{
+
+Three signals, taken in that order and judged per survey day, because one
+part of a file may record line numbers where another records only
+begin-line events.
+
+\describe{
+\item{A begin-line record}{\code{LEGSTAGE == 1} always opens an occupation.
+Without this a line flown twice under one number is silently a single
+occupation, since nothing about \code{LEGNO} changes between the two.}
+\item{A change of \code{LEGNO}}{Opens an occupation, as it always has.}
+\item{A run of census track}{Only where the day records neither of the
+above. This is inference rather than a reading of what was recorded, so
+those occupations are named \verb{derived_<n>} and reported.}
+}
+
+An occupation never spans two days: \code{DATE} and \code{FILEID} bound it. Records
+that are not part of any line — transit out to the survey area with no
+\code{LEGNO}, no begin-line record and no census track — keep \code{LEGNO3} of \code{NA}.
+}
+
 \examples{
 path <- system.file("extdata", "narwc-example.csv", package = "narwcr")
 dat <- make_leg_id(read_narwc(path))
