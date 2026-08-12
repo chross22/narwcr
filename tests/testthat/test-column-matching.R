@@ -896,3 +896,50 @@ test_that("a recorded DATE is never overwritten by the parts", {
   out <- read_narwc(dat, quiet = TRUE)
   expect_equal(out$DATE, as.Date(c("2024-03-02", "2024-03-03")))
 })
+
+# Two spellings covering different eras ---------------------------------------
+
+test_that("a losing spelling fills the winner's blanks", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:4, Date_UTC = "2024-04-02",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    TrkTime_UTC = c(NA, NA, "120002", "120003"),   # recent era only
+    TIME_UTC    = c("120000", "120001", NA, NA),   # the decades before it
+    stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$TIME, c(120000, 120001, 120002, 120003))
+})
+
+test_that("the winner still wins where both speak", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:2, Date_UTC = "2024-04-02",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    TrkTime_UTC = c("120002", "120003"),
+    TIME_UTC    = c("999999", "999999"),
+    stringsAsFactors = FALSE
+  )
+  expect_equal(read_narwc(dat, quiet = TRUE)$TIME, c(120002, 120003))
+})
+
+test_that("the losing spelling is not left in the result", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:2, Date_UTC = "2024-04-02",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    TrkTime_UTC = c(NA, "120003"), TIME_UTC = c("120000", NA),
+    stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_false("TIME_UTC" %in% names(out))
+  expect_false(anyNA(out$TIME))
+})
+
+test_that("filling from a losing spelling is reported", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:2, Date_UTC = "2024-04-02",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    TrkTime_UTC = c(NA, "120003"), TIME_UTC = c("120000", NA),
+    stringsAsFactors = FALSE
+  )
+  expect_message(read_narwc(dat), "did not record")
+})

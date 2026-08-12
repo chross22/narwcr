@@ -233,7 +233,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     # on a known clock, and dropping it here meant falling back to rebuilding
     # the date from three columns that may be on a different one.
     keep <- c(schema$required, schema$optional, "DATE",
-              unname(resolved$displaced),
+              unname(resolved$displaced), unlist(resolved$backup),
               expand_column_globs(extra_columns, names(dat)))
     dropped <- setdiff(names(dat), keep)
     dat <- dat[, intersect(keep, names(dat)), drop = FALSE]
@@ -316,6 +316,46 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
         ))
       }
     }
+  }
+
+  # 4d. Fill the winner's blanks from the spellings that lost to it, then drop
+  #     them. Two columns claiming one canonical name are usually the same
+  #     thing written twice — but in an archive assembled from several eras
+  #     they are the same thing written twice *in different decades*, and the
+  #     one that wins on precedence covers only its own. `TrkTime_UTC` beat
+  #     `TIME(UTC)` for TIME and held 1.4M of 5.1M records; the other 3.7M
+  #     would have had no clock at all.
+  for (target in names(resolved$backup)) {
+    if (!target %in% names(dat)) next
+    for (src in resolved$backup[[target]]) {
+      if (!src %in% names(dat)) next
+      if (!anyNA(dat[[target]])) break
+
+      alt <- dat[[src]]
+      if (target %in% narwc_numeric_columns && !is.numeric(alt)) {
+        alt <- if (target %in% c("TIME", "S_TIME")) {
+          parse_narwc_time(alt)
+        } else {
+          suppressWarnings(as.numeric(alt))
+        }
+      }
+      gap <- is.na(dat[[target]]) & !is.na(alt)
+      if (any(gap)) {
+        dat[[target]][gap] <- alt[gap]
+        if (!quiet) {
+          rlang::inform(paste0(
+            "`", src, "` supplied ", sum(gap), " value",
+            if (sum(gap) > 1) "s" else "", " of `", target,
+            "` that the column chosen for it did not record. Two spellings of ",
+            "one variable can each cover a different part of a file."
+          ))
+        }
+      }
+    }
+  }
+  drop_backup <- intersect(unlist(resolved$backup), names(dat))
+  if (length(drop_backup)) {
+    dat <- dat[, setdiff(names(dat), drop_backup), drop = FALSE]
   }
 
   # 5. Reconcile DATE with the date parts, in whichever direction the file
@@ -534,6 +574,7 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   guessed <- found[2, ] == "TRUE"
   inferred <- logical(0)
   conversions <- numeric(0)
+  backup <- list()
 
   for (target in unique(stats::na.omit(wants))) {
     if (target %in% taken) next
@@ -593,6 +634,15 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
     renames[nms[pick]] <- target
     inferred <- c(inferred, guessed[pick])
     taken <- c(taken, target)
+
+    # The claimants that lost. They are normally redundant spellings of the
+    # same thing, but an archive spanning eras may record one era in one
+    # spelling and another in another - `Date_UTC` for recent years and
+    # `TIME(UTC)` for the decades before it. Kept so the winner's blanks can
+    # be filled from them, then dropped.
+    if (length(claimants) > 1L) {
+      backup[[target]] <- nms[setdiff(claimants, pick)]
+    }
   }
 
   # Appended last so that `inferred` stays aligned with `renames`. A displaced
@@ -603,7 +653,7 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   }
 
   list(renames = renames, inferred = inferred, conversions = conversions,
-       displaced = displaced)
+       displaced = displaced, backup = backup)
 }
 
 # The whole dictionary, so a rename can be checked rather than trusted. Each
