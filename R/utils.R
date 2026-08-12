@@ -52,6 +52,18 @@ require_columns <- function(dat, cols, what = "dat", call = rlang::caller_env())
   invisible(dat)
 }
 
+# Great-circle distance in km. distsamp's `gc_distance()` is the real one, with
+# the handbook's three methods and their history; this is a plain haversine and
+# is deliberately not exported. narwcr cannot depend on distsamp without a
+# cycle, and `track_speed()` needs a distance only to tell 10 knots from 100 —
+# a scale where the choice of formula does not matter.
+haversine_km <- function(lat1, lon1, lat2, lon2) {
+  r <- pi / 180
+  a <- sin((lat2 - lat1) * r / 2)^2 +
+    cos(lat1 * r) * cos(lat2 * r) * sin((lon2 - lon1) * r / 2)^2
+  2 * 6371.0088 * asin(pmin(1, sqrt(a)))
+}
+
 # Does a column carry anything at all? Uses the same definition of missing as
 # `blank_to_na()`, because a column of "." is empty whatever `nzchar()` thinks,
 # and "." is what NARWC writes for missing.

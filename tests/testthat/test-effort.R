@@ -188,3 +188,65 @@ test_that("the note counts line occupations, not every stretch", {
   expect_match(msg, "found 1 line occupation")
   expect_no_match(msg, "found 2 line occupation")
 })
+
+# Platform from speed ---------------------------------------------------------
+
+speed_frame <- function(metres_per_fix, n = 30, legno = "1") {
+  step <- metres_per_fix / 111120          # degrees of latitude
+  data.frame(
+    FILEID = "F", EVENTNO = seq_len(n), DATE = as.Date("2024-04-01"),
+    LEGNO = legno, LEGSTAGE = c(1, rep(2, n - 2), 5), LEGTYPE = 2,
+    LATITUDE = 43 + (seq_len(n) - 1) * step, LONGITUDE = -69,
+    TIME = 120000 + seq_len(n) - 1,        # one second apart
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("track_speed recovers a known speed", {
+  # 51.4 m/s is 100 knots.
+  kn <- track_speed(make_leg_id(speed_frame(51.4), quiet = TRUE))
+  expect_equal(round(median(kn, na.rm = TRUE)), 100)
+})
+
+test_that("the last record of a stretch has no speed", {
+  d <- make_leg_id(speed_frame(51.4), quiet = TRUE)
+  expect_true(is.na(track_speed(d)[nrow(d)]))
+})
+
+test_that("speed is never taken across a break", {
+  a <- speed_frame(51.4, legno = "1")
+  b <- speed_frame(51.4, legno = "2")
+  b$EVENTNO <- b$EVENTNO + 100
+  b$LATITUDE <- b$LATITUDE + 5           # a long ferry between the two
+  b$TIME <- b$TIME + 3600
+  d <- make_leg_id(rbind(a, b), quiet = TRUE)
+
+  kn <- track_speed(d)
+  expect_lt(max(kn, na.rm = TRUE), 200)  # no absurd cross-line value
+})
+
+test_that("classify_platform tells an aircraft from a vessel", {
+  air <- make_leg_id(speed_frame(51.4), quiet = TRUE)          # 100 kt
+  sea <- make_leg_id(speed_frame(5.3), quiet = TRUE)           # 10 kt
+  expect_equal(unique(as.character(classify_platform(air))), "aerial")
+  expect_equal(unique(as.character(classify_platform(sea))), "vessel")
+})
+
+test_that("a platform that is not moving is its own label", {
+  still <- speed_frame(0.1)
+  expect_equal(unique(as.character(classify_platform(
+    make_leg_id(still, quiet = TRUE)))), "stationary")
+})
+
+test_that("a whole stretch takes one label", {
+  d <- speed_frame(51.4)
+  d$LATITUDE[15] <- d$LATITUDE[14]       # one repeated fix mid-line
+  lab <- classify_platform(make_leg_id(d, quiet = TRUE))
+  expect_equal(length(unique(as.character(lab))), 1)
+})
+
+test_that("the threshold is an argument", {
+  sea <- make_leg_id(speed_frame(5.3), quiet = TRUE)
+  expect_equal(unique(as.character(
+    classify_platform(sea, aerial_min = 5))), "aerial")
+})

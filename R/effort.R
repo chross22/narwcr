@@ -447,3 +447,145 @@ on_effort_census_rows <- function(dat) {
   }
   ok
 }
+
+
+#' Speed implied by consecutive position fixes
+#'
+#' The distance from each record to the next, divided by the time between them.
+#' Computed from what the receiver logged rather than from any speed column, so
+#' it is available on any file carrying positions and a clock.
+#'
+#' @section Why this exists:
+#' Nothing in a NARWC file reliably says what the platform was. `PLATFORM` is
+#' optional, has no code book, and is empty on real extracts; `LEGTYPE` codes
+#' 5 and 6 mark shipboard records but a mixed file may use the aerial codes
+#' throughout. Speed cannot be mistaken for something else: a survey aircraft
+#' flies at 90-120 knots and a vessel surveys at about 10, and no arrangement
+#' of the other columns makes one look like the other.
+#'
+#' @param dat A data frame with `LATITUDE`, `LONGITUDE` and `TIME`, in survey
+#'   order.
+#' @param by Columns identifying a stretch to compute within, so speed is never
+#'   taken across a break. `NULL` (default) uses `LEGNO3` when present, else
+#'   `DATE` and `FILEID`.
+#' @param max_gap Ignore intervals longer than this many seconds. Default
+#'   `300`. A long gap is a break in the record rather than slow travel, and
+#'   including it drags the speed down.
+#'
+#' @return A numeric vector of knots, one per row: the speed from that record
+#'   to the next. `NA` at the end of each stretch and wherever the interval is
+#'   unusable.
+#'
+#' @seealso [classify_platform()], which turns this into a platform label.
+#'
+#' @examples
+#' path <- system.file("extdata", "narwc-example.csv", package = "narwcr")
+#' dat <- make_leg_id(read_narwc(path, quiet = TRUE), quiet = TRUE)
+#' summary(track_speed(dat))
+#'
+#' @export
+track_speed <- function(dat, by = NULL, max_gap = 300) {
+  require_columns(dat, c("LATITUDE", "LONGITUDE", "TIME"))
+  n <- nrow(dat)
+  if (n < 2L) {
+    return(rep(NA_real_, n))
+  }
+
+  if (is.null(by)) {
+    by <- if ("LEGNO3" %in% names(dat)) "LEGNO3" else
+      intersect(c("DATE", "FILEID"), names(dat))
+  }
+  key <- if (length(by)) {
+    do.call(paste, c(lapply(by, function(nm) as.character(dat[[nm]])),
+                     sep = "\r"))
+  } else {
+    rep("", n)
+  }
+
+  tt <- sprintf("%06d", ifelse(is.na(dat$TIME), 0L, as.integer(round(dat$TIME))))
+  tsec <- as.numeric(substr(tt, 1, 2)) * 3600 +
+    as.numeric(substr(tt, 3, 4)) * 60 + as.numeric(substr(tt, 5, 6))
+
+  gap <- c(diff(tsec), NA_real_)
+  step <- c(haversine_km(
+    utils::head(dat$LATITUDE, -1), utils::head(dat$LONGITUDE, -1),
+    utils::tail(dat$LATITUDE, -1), utils::tail(dat$LONGITUDE, -1)
+  ) * 1000, NA_real_)
+
+  same <- c(!is.na(key[-n]) & key[-n] == key[-1], FALSE)
+  ok <- same & !is.na(gap) & gap > 0 & gap <= max_gap & !is.na(step) &
+    !is.na(dat$TIME)
+
+  out <- rep(NA_real_, n)
+  out[ok] <- step[ok] / gap[ok] * 1.94384
+  out
+}
+
+
+#' Label each record's platform from how fast it was moving
+#'
+#' Classifies every record as `"aerial"`, `"vessel"` or `"stationary"` using
+#' the median [track_speed()] of the stretch it belongs to. A whole stretch
+#' takes one label, because a platform does not change mid-line.
+#'
+#' @section What this is for:
+#' A single NARWC extract can hold both an aerial and a shipboard survey with
+#' nothing to tell them apart. On the file this was built against, `PLATFORM`
+#' was `NA` on all 1,394,556 records and the aerial `LEGTYPE` codes were used
+#' throughout — but 738 line occupations flew at 40-131 knots and 299 moved at
+#' about 10. That matters because the distance machinery is not
+#' platform-agnostic: a declination angle and a strip width are aircraft
+#' measurements, and a shipboard survey measures by reticle and bearing.
+#'
+#' Prefer a recorded signal where the file has one. On that extract every
+#' aerial occupation carried a `LEGNO` and no vessel occupation did, agreeing
+#' with speed on 1037 of 1038 — a line number is a reading, where a speed
+#' threshold is an inference.
+#'
+#' @param dat A data frame with `LATITUDE`, `LONGITUDE` and `TIME`.
+#' @param by Passed to [track_speed()].
+#' @param aerial_min Knots at or above which a stretch is aerial. Default `40`,
+#'   comfortably between a surveying vessel and the slowest survey aircraft.
+#' @param stationary_max Knots at or below which a stretch is stationary.
+#'   Default `2`.
+#' @param max_gap Passed to [track_speed()].
+#'
+#' @return A factor with levels `"stationary"`, `"vessel"`, `"aerial"`, one per
+#'   row, `NA` where the stretch has too little usable time to judge.
+#'
+#' @seealso [track_speed()]
+#'
+#' @examples
+#' path <- system.file("extdata", "narwc-example.csv", package = "narwcr")
+#' dat <- make_leg_id(read_narwc(path, quiet = TRUE), quiet = TRUE)
+#' table(classify_platform(dat), useNA = "ifany")
+#'
+#' @export
+classify_platform <- function(dat, by = NULL, aerial_min = 40,
+                              stationary_max = 2, max_gap = 300) {
+  kn <- track_speed(dat, by = by, max_gap = max_gap)
+  n <- nrow(dat)
+
+  if (is.null(by)) {
+    by <- if ("LEGNO3" %in% names(dat)) "LEGNO3" else
+      intersect(c("DATE", "FILEID"), names(dat))
+  }
+  key <- if (length(by)) {
+    do.call(paste, c(lapply(by, function(nm) as.character(dat[[nm]])),
+                     sep = "\r"))
+  } else {
+    rep("", n)
+  }
+
+  # One label per stretch, from its median. A single interval can be anything -
+  # a repeated fix, a dropped second - and a platform does not change mid-line.
+  med <- tapply(kn, key, function(v) stats::median(v, na.rm = TRUE))
+  per_row <- unname(med[key])
+
+  factor(
+    ifelse(is.na(per_row), NA_character_,
+           ifelse(per_row <= stationary_max, "stationary",
+                  ifelse(per_row >= aerial_min, "aerial", "vessel"))),
+    levels = c("stationary", "vessel", "aerial")
+  )
+}
