@@ -817,3 +817,49 @@ test_that("ALT_ASSUMED does not split events either", {
   expect_equal(out$ALT_ASSUMED, c(TRUE, FALSE))
   expect_equal(length(unique(out$EVENTNO)), 1)
 })
+
+# A preferred source covers only the records it recorded ----------------------
+
+trk_era_frame <- function() {
+  # A GPS track fitted partway through: the plain columns cover everything,
+  # the Trk ones only the later records. This is what a multi-decade archive
+  # looks like.
+  data.frame(
+    FILEID = "F", EVENTNO = 1:4, Date_UTC = "2024-04-02",
+    Time_UTC = "120000", LEGTYPE = "2",
+    LATITUDE  = c("43.1", "43.2", "43.3", "43.4"),
+    LONGITUDE = c("-69.1", "-69.2", "-69.3", "-69.4"),
+    TrkLatitude  = c(NA, NA, "44.3", "44.4"),
+    TrkLongitude = c(NA, NA, "-70.3", "-70.4"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("a preferred source does not empty the years it does not cover", {
+  out <- suppressWarnings(read_narwc(trk_era_frame(), quiet = TRUE))
+  expect_equal(nrow(out), 4)
+  expect_equal(out$LATITUDE, c(43.1, 43.2, 44.3, 44.4))
+  expect_equal(out$LONGITUDE, c(-69.1, -69.2, -70.3, -70.4))
+})
+
+test_that("the displaced column is still kept whole", {
+  out <- suppressWarnings(read_narwc(trk_era_frame(), quiet = TRUE))
+  expect_equal(out$LATITUDE_ORIGINAL, c("43.1", "43.2", "43.3", "43.4"))
+})
+
+test_that("records are not dropped for want of a track column", {
+  # The failure this exists for: 3,754,148 of 5,148,704 records dropped
+  # because the GPS track covered only the last two years.
+  dat <- trk_era_frame()
+  expect_equal(nrow(suppressWarnings(read_narwc(dat, quiet = TRUE))), 4)
+})
+
+test_that("the fallback is converted to the canonical unit, the source is not", {
+  dat <- trk_era_frame()
+  dat$ALT <- c("229", "229", "229", "229")       # metres, the file's own
+  dat$TrkAltitude_ft <- c(NA, NA, "500", "500")  # 152.4 m once converted
+
+  out <- suppressWarnings(read_narwc(dat, quiet = TRUE))
+  # Feet converted; the metres fallback left alone, not rescaled with it.
+  expect_equal(round(out$ALT, 1), c(229, 229, 152.4, 152.4))
+})

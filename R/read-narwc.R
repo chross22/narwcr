@@ -232,7 +232,8 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     # MONTH and DAY — but a file that supplies `Date_UTC` has told us the date
     # on a known clock, and dropping it here meant falling back to rebuilding
     # the date from three columns that may be on a different one.
-    keep <- c(schema$required, schema$optional, "DATE", resolved$displaced,
+    keep <- c(schema$required, schema$optional, "DATE",
+              unname(resolved$displaced),
               expand_column_globs(extra_columns, names(dat)))
     dropped <- setdiff(names(dat), keep)
     dat <- dat[, intersect(keep, names(dat)), drop = FALSE]
@@ -277,6 +278,45 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
   # 4b. Rescale anything whose input name declared a different unit. After
   #     step 4, because until then these columns are still character.
   dat <- apply_unit_conversions(dat, resolved$conversions, quiet)
+
+  # 4c. A preferred source replaces the column it displaced only where it
+  #     actually has a value. Preference is about which column to believe when
+  #     both say something, not about which column exists: a GPS track log
+  #     covers the years the receiver was fitted, and an archive spanning
+  #     decades has the plain column for everything before that. Replacing
+  #     wholesale emptied LATITUDE on every older record, and
+  #     `drop_missing_position` then removed them - 3,754,148 of 5,148,704 on
+  #     a real archive, leaving exactly the GPS-logger era behind.
+  #
+  #     After the unit conversion, so the displaced column is not rescaled by
+  #     a factor that belongs to the column that displaced it.
+  for (target in names(resolved$displaced)) {
+    keep <- unname(resolved$displaced[[target]])
+    if (!all(c(target, keep) %in% names(dat))) next
+
+    orig <- dat[[keep]]
+    if (target %in% narwc_numeric_columns && !is.numeric(orig)) {
+      orig <- if (target %in% c("TIME", "S_TIME")) {
+        parse_narwc_time(orig)
+      } else {
+        suppressWarnings(as.numeric(orig))
+      }
+    }
+
+    gap <- is.na(dat[[target]]) & !is.na(orig)
+    if (any(gap)) {
+      dat[[target]][gap] <- orig[gap]
+      if (!quiet) {
+        rlang::inform(paste0(
+          "`", keep, "` supplied ", sum(gap), " value",
+          if (sum(gap) > 1) "s" else "", " of `", target,
+          "` that the preferred source did not record. A preferred source is ",
+          "the one to believe where both speak, not a replacement for the ",
+          "years it does not cover."
+        ))
+      }
+    }
+  }
 
   # 5. Reconcile DATE with the date parts, in whichever direction the file
   #    leaves open. YEAR, MONTH and DAY are required columns, so a file that
@@ -541,7 +581,7 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   }
 
   list(renames = renames, inferred = inferred, conversions = conversions,
-       displaced = unname(displaced))
+       displaced = displaced)
 }
 
 # The whole dictionary, so a rename can be checked rather than trusted. Each
