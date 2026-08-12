@@ -696,8 +696,18 @@ supply_event_number <- function(dat, quiet = FALSE) {
   # multiple sightings at one event, and then "all of the non-sighting
   # variables must be identical across all records". So an event is a run of
   # consecutive records agreeing on every non-sighting variable.
-  event_cols <- setdiff(names(dat),
-                        c(narwc_sighting_columns(), "EVENTNO", "FILEID"))
+  # "Every non-sighting variable" means every variable the *survey* recorded.
+  # Columns this package added are not survey variables: a displaced
+  # `LATITUDE_ORIGINAL` carries the same information as the `LATITUDE` that
+  # replaced it, and `ALT_ASSUMED` records a decision rather than an
+  # observation. Letting them in makes event numbering depend on how the file
+  # was read — the same extract read with and without the displacement gave
+  # different EVENTNO on all 227,779 records.
+  event_cols <- setdiff(
+    names(dat),
+    c(narwc_sighting_columns(), "EVENTNO", "FILEID",
+      grep("_ORIGINAL$", names(dat), value = TRUE), "ALT_ASSUMED")
+  )
   shifted <- character(0)
 
   for (f in unique(file_key)) {

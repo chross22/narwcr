@@ -782,3 +782,38 @@ test_that("giving both units is an error", {
     "not both"
   )
 })
+
+test_that("event numbering ignores the columns the reader itself added", {
+  # The same records, read once with a Trk column displacing LATITUDE and once
+  # without. A displaced column carries no survey information the canonical
+  # one does not, so it must not split events.
+  plain <- data.frame(
+    FILEID = "F", EVENTNO = NA_character_, Date_UTC = "2024-04-02",
+    Time_UTC = c("120000", "120000", "120001"),
+    LATITUDE = c("43.00", "43.00", "43.01"), LONGITUDE = "-69",
+    LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+  displaced <- plain
+  displaced$TrkLatitude <- displaced$LATITUDE
+  displaced$LATITUDE <- c("9.1", "9.2", "9.3")   # varies every row
+
+  a <- read_narwc(plain, quiet = TRUE)
+  b <- suppressWarnings(read_narwc(displaced, quiet = TRUE))
+
+  expect_true("LATITUDE_ORIGINAL" %in% names(b))
+  expect_equal(a$EVENTNO, b$EVENTNO)
+})
+
+test_that("ALT_ASSUMED does not split events either", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = NA_character_, Date_UTC = "2024-04-02",
+    Time_UTC = c("120000", "120000"), LATITUDE = "43", LONGITUDE = "-69",
+    # One recorded, one filled to the same value: identical ALT either way,
+    # differing only in ALT_ASSUMED.
+    LEGTYPE = "2", ALT = c(NA, "228.6"), stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, assume_alt_ft = 750, quiet = TRUE)
+  expect_equal(out$ALT, c(228.6, 228.6))
+  expect_equal(out$ALT_ASSUMED, c(TRUE, FALSE))
+  expect_equal(length(unique(out$EVENTNO)), 1)
+})
