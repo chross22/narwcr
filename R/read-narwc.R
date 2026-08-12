@@ -258,7 +258,10 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
   #     step 4, because until then these columns are still character.
   dat <- apply_unit_conversions(dat, resolved$conversions, quiet)
 
-  # 5. Derive DATE when the date parts are all present.
+  # 5. Reconcile DATE with the date parts, in whichever direction the file
+  #    leaves open. YEAR, MONTH and DAY are required columns, so a file that
+  #    carries a date but not its parts fails validation for three variables
+  #    it demonstrably has.
   parts <- all(c("YEAR", "MONTH", "DAY") %in% names(dat))
   from_parts <- function() {
     as.Date(sprintf("%04d-%02d-%02d", dat$YEAR, dat$MONTH, dat$DAY))
@@ -292,6 +295,31 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
       dat$DATE <- from_parts()
     } else {
       dat$DATE <- parsed
+    }
+  }
+
+  # 5a. And the other direction. Splitting a date into its parts is exact —
+  #     nothing is inferred and no clock is assumed, unlike rebuilding a date
+  #     from parts that may be on a different one. Only blanks are filled, so
+  #     a file that records both keeps what it recorded.
+  if ("DATE" %in% names(dat) && inherits(dat$DATE, "Date")) {
+    filled <- character(0)
+    for (nm in c("YEAR", "MONTH", "DAY")) {
+      from <- as.numeric(format(dat$DATE, c(YEAR = "%Y", MONTH = "%m",
+                                            DAY = "%d")[[nm]]))
+      gap <- if (nm %in% names(dat)) is.na(dat[[nm]]) else rep(TRUE, nrow(dat))
+      if (!any(gap & !is.na(from))) next
+      if (!nm %in% names(dat)) dat[[nm]] <- NA_real_
+      dat[[nm]][gap] <- from[gap]
+      filled <- c(filled, nm)
+    }
+    if (length(filled) && !quiet) {
+      rlang::inform(paste0(
+        "`read_narwc()` filled ", paste(filled, collapse = ", "),
+        " from `DATE`. They are required columns and splitting a date into ",
+        "them is exact, so a file carrying the date but not its parts does ",
+        "not need to fail validation for them."
+      ))
     }
   }
 

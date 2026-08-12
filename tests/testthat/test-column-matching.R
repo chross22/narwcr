@@ -678,3 +678,46 @@ test_that("a Trk position of placeholders does not displace a real one", {
   expect_equal(out$LATITUDE, c(43.5, 43.6))
   expect_false("LATITUDE_ORIGINAL" %in% names(out))
 })
+
+# YEAR, MONTH and DAY from DATE -----------------------------------------------
+
+test_that("the date parts are filled from a supplied DATE", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = "1", Date_UTC = "2024-04-02", Time_UTC = "120000",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(c(out$YEAR, out$MONTH, out$DAY), c(2024, 4, 2))
+  expect_equal(out$DATE, as.Date("2024-04-02"))
+})
+
+test_that("recorded parts are kept, only blanks are filled", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = c("1", "2"), Date_UTC = "2024-04-02",
+    # A one-day difference, as a UTC-to-local boundary gives. A larger gap
+    # would trip the year check and rebuild DATE from the parts instead.
+    Year = c("2024", NA), Month = c("4", NA), Day = c("1", NA),
+    Time_UTC = "120000", LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$YEAR, c(2024, 2024))
+  expect_equal(out$DAY, c(1, 2))
+})
+
+test_that("filling the parts is reported", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = "1", Date_UTC = "2024-04-02", Time_UTC = "120000",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+  expect_message(read_narwc(dat), "filled YEAR, MONTH, DAY from `DATE`")
+})
+
+test_that("a file with no DATE and no parts is left alone", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = "1", Time_UTC = "120000",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_false("YEAR" %in% names(out))
+})
