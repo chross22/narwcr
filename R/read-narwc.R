@@ -577,8 +577,17 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   backup <- list()
 
   for (target in unique(stats::na.omit(wants))) {
-    if (target %in% taken) next
     claimants <- which(wants == target)
+
+    # A canonical column already present wins outright — but the spellings
+    # that lost to it may still cover records it does not. `EVENTNO` held the
+    # older era of an archive and `Event` the newer one; skipping straight
+    # past meant 1,394,560 event numbers were invented while the real ones
+    # sat in the column that lost.
+    if (target %in% taken) {
+      if (length(claimants)) backup[[target]] <- nms[claimants]
+      next
+    }
 
     # A column with nothing in it cannot outrank one that has data. Priority
     # is written over spellings — metres before feet, UTC before local — and

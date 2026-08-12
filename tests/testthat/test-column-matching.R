@@ -943,3 +943,29 @@ test_that("filling from a losing spelling is reported", {
   )
   expect_message(read_narwc(dat), "did not record")
 })
+
+test_that("a real event number is used before one is invented", {
+  # The archive case: `EVENTNO` covers the older era, `Event` the newer one.
+  # The numbers exist; they are just under two spellings.
+  dat <- data.frame(
+    FILEID = "F", Date_UTC = "2024-04-02", Time_UTC = "120000",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    EVENTNO = c("11", "12", NA, NA),
+    Event   = c(NA, NA, "13", "14"),
+    stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(11, 12, 13, 14))
+})
+
+test_that("only genuinely absent event numbers are invented", {
+  dat <- data.frame(
+    FILEID = "F", Date_UTC = "2024-04-02",
+    Time_UTC = c("120000", "120001", "120002"),
+    LATITUDE = c("43", "43.1", "43.2"), LONGITUDE = "-69", LEGTYPE = "2",
+    EVENTNO = c("11", NA, "13"),
+    stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$EVENTNO, c(11, 12, 13))   # 12 fits between the recorded pair
+})
