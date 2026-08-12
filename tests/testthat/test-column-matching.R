@@ -863,3 +863,36 @@ test_that("the fallback is converted to the canonical unit, the source is not", 
   # Feet converted; the metres fallback left alone, not rescaled with it.
   expect_equal(round(out$ALT, 1), c(229, 229, 152.4, 152.4))
 })
+
+test_that("a DATE column covering part of a file is completed from the parts", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:3,
+    YEAR = c("1979", "1979", "2024"), MONTH = c("1", "1", "3"),
+    DAY = c("24", "25", "2"),
+    Date_UTC = c(NA, NA, "2024-03-02"),      # only the recent era
+    Time_UTC = "120000", LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$DATE, as.Date(c("1979-01-24", "1979-01-25", "2024-03-02")))
+  expect_false(anyNA(out$DATE))
+})
+
+test_that("building the missing dates is reported", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:2, YEAR = "1979", MONTH = "1", DAY = c("24", "25"),
+    Date_UTC = c(NA, NA), Time_UTC = "120000",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+  expect_message(read_narwc(dat), "built 2 missing `DATE` values")
+})
+
+test_that("a recorded DATE is never overwritten by the parts", {
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:2, YEAR = "2024", MONTH = "3", DAY = c("2", "3"),
+    Date_UTC = c("2024-03-02", NA), Time_UTC = "120000",
+    LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2", stringsAsFactors = FALSE
+  )
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$DATE, as.Date(c("2024-03-02", "2024-03-03")))
+})

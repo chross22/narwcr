@@ -358,6 +358,28 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     }
   }
 
+  # And per record, not only per column. A `DATE` column that exists but is
+  # blank for the years before the programme started recording it leaves those
+  # records dateless, and DATE bounds every line occupation and every effort
+  # grouping. An archive spanning decades carried `Date_UTC` for its recent
+  # era only: 3,754,144 of 5,148,700 records had the column and no value in it.
+  if ("DATE" %in% names(dat) && parts && anyNA(dat$DATE)) {
+    built <- from_parts()
+    gap <- is.na(dat$DATE) & !is.na(built)
+    if (any(gap)) {
+      dat$DATE[gap] <- built[gap]
+      if (!quiet) {
+        rlang::inform(paste0(
+          "`read_narwc()` built ", sum(gap), " missing `DATE` value",
+          if (sum(gap) > 1) "s" else "",
+          " from `YEAR`, `MONTH` and `DAY`. A date column that covers only ",
+          "part of a file leaves the rest with no date at all, and `DATE` ",
+          "bounds every line occupation and effort total."
+        ))
+      }
+    }
+  }
+
   # 5a. And the other direction. Splitting a date into its parts is exact —
   #     nothing is inferred and no clock is assumed, unlike rebuilding a date
   #     from parts that may be on a different one. Only blanks are filled, so
