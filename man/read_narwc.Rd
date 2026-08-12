@@ -11,6 +11,8 @@ read_narwc(
   drop_missing_position = TRUE,
   prefer_source = TRUE,
   make_eventno = TRUE,
+  assume_alt_m = NULL,
+  assume_alt_ft = NULL,
   quiet = FALSE,
   ...
 )
@@ -38,6 +40,26 @@ and \code{LEGTYPE_BK} over a plain \code{LEGTYPE}. Default \code{TRUE}; see belo
 has some. Default \code{TRUE}; see below. \code{FALSE} leaves them \code{NA}. A file with
 no \code{EVENTNO} column at all is left alone either way — that is a missing
 required variable for \code{\link[=validate_narwc]{validate_narwc()}} to report.}
+
+\item{assume_alt_m}{The survey altitude in \strong{metres}, used where a record
+has none. \code{NULL} (default) leaves a missing \code{ALT} missing. Records given
+this value are marked in an \code{ALT_ASSUMED} column and the fill is reported.
+
+Metres, not feet: \code{ALT} is metres throughout (handbook 8.A.1), so a
+750-foot survey altitude is \code{assume_alt_m = 228.6}. Passing \code{750} would
+put every record above \code{flag_effort()}'s 366 m ceiling and take them all
+off effort — the opposite of what filling an altitude is usually for. Use
+\code{assume_alt_ft} and avoid the question.
+
+This is a stated altitude, not a measured one. \code{ALT} feeds
+\code{perp_distance()}, so every right-angle distance computed from a filled
+record inherits whatever you state here — which is why it is off by
+default, and why \code{ALT_ASSUMED} exists to find those records afterwards.}
+
+\item{assume_alt_ft}{The same, stated in feet — \code{assume_alt_ft = 750} for a
+750-foot survey — and converted to metres for you. Survey teams state
+altitude in feet and the package stores metres, so this is the safer of
+the two. Giving both is an error.}
 
 \item{quiet}{Suppress the messages naming matched columns, dropped columns,
 dropped records, and unit conversions. Default \code{FALSE}.}

@@ -138,6 +138,24 @@
 #'   canonical column of the same name — `TrkLatitude` over a plain `LATITUDE`,
 #'   and `LEGTYPE_BK` over a plain `LEGTYPE`. Default `TRUE`; see below.
 #'   `FALSE` restores "the column already named `LATITUDE` always wins".
+#' @param assume_alt_m The survey altitude in **metres**, used where a record
+#'   has none. `NULL` (default) leaves a missing `ALT` missing. Records given
+#'   this value are marked in an `ALT_ASSUMED` column and the fill is reported.
+#'
+#'   Metres, not feet: `ALT` is metres throughout (handbook 8.A.1), so a
+#'   750-foot survey altitude is `assume_alt_m = 228.6`. Passing `750` would
+#'   put every record above `flag_effort()`'s 366 m ceiling and take them all
+#'   off effort — the opposite of what filling an altitude is usually for. Use
+#'   `assume_alt_ft` and avoid the question.
+#'
+#'   This is a stated altitude, not a measured one. `ALT` feeds
+#'   `perp_distance()`, so every right-angle distance computed from a filled
+#'   record inherits whatever you state here — which is why it is off by
+#'   default, and why `ALT_ASSUMED` exists to find those records afterwards.
+#' @param assume_alt_ft The same, stated in feet — `assume_alt_ft = 750` for a
+#'   750-foot survey — and converted to metres for you. Survey teams state
+#'   altitude in feet and the package stores metres, so this is the safer of
+#'   the two. Giving both is an error.
 #' @param make_eventno Supply the missing values of an `EVENTNO` column that
 #'   has some. Default `TRUE`; see below. `FALSE` leaves them `NA`. A file with
 #'   no `EVENTNO` column at all is left alone either way — that is a missing
@@ -171,7 +189,9 @@
 #' @export
 read_narwc <- function(x, extra_columns = character(), profile = NULL,
                        drop_missing_position = TRUE, prefer_source = TRUE,
-                       make_eventno = TRUE, quiet = FALSE, ...) {
+                       make_eventno = TRUE, assume_alt_m = NULL,
+                       assume_alt_ft = NULL,
+                       quiet = FALSE, ...) {
   dat <- if (is.data.frame(x)) {
     x
   } else if (is.character(x) && length(x) == 1L) {
@@ -320,6 +340,33 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
         "them is exact, so a file carrying the date but not its parts does ",
         "not need to fail validation for them."
       ))
+    }
+  }
+
+  # 5a2. A stated survey altitude, where the file records none. Survey teams
+  #      state altitude in feet; the package stores metres. Converting here
+  #      rather than asking the caller to is the whole point of the argument.
+  if (!is.null(assume_alt_ft)) {
+    if (!is.null(assume_alt_m)) {
+      rlang::abort("Give `assume_alt_m` or `assume_alt_ft`, not both.")
+    }
+    assume_alt_m <- assume_alt_ft * 0.3048
+  }
+  if (!is.null(assume_alt_m)) {
+    if (!"ALT" %in% names(dat)) dat$ALT <- NA_real_
+    gap <- is.na(dat$ALT)
+    dat$ALT_ASSUMED <- gap
+    if (any(gap)) {
+      dat$ALT[gap] <- assume_alt_m
+      if (!quiet) {
+        rlang::inform(paste0(
+          "`read_narwc()` set ALT to ", assume_alt_m, " m on ", sum(gap),
+          " record", if (sum(gap) > 1) "s" else "", " that recorded none. ",
+          "`ALT_ASSUMED` marks them. ALT feeds `perp_distance()`, so any ",
+          "right-angle distance computed from those records rests on the ",
+          "altitude you stated rather than one that was measured."
+        ))
+      }
     }
   }
 

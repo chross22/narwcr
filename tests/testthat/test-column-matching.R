@@ -721,3 +721,64 @@ test_that("a file with no DATE and no parts is left alone", {
   out <- read_narwc(dat, quiet = TRUE)
   expect_false("YEAR" %in% names(out))
 })
+
+# A stated survey altitude ----------------------------------------------------
+
+alt_frame <- function(alt = c(NA, "200")) {
+  data.frame(
+    FILEID = "F", EVENTNO = seq_along(alt), Date_UTC = "2024-04-02",
+    Time_UTC = "120000", LATITUDE = "43", LONGITUDE = "-69", LEGTYPE = "2",
+    ALT = alt, stringsAsFactors = FALSE
+  )
+}
+
+test_that("assume_alt_m fills only the records with no altitude", {
+  out <- read_narwc(alt_frame(), assume_alt_m = 228.6, quiet = TRUE)
+  expect_equal(out$ALT, c(228.6, 200))
+  expect_equal(out$ALT_ASSUMED, c(TRUE, FALSE))
+})
+
+test_that("the fill is reported, naming what it rests on", {
+  expect_message(read_narwc(alt_frame(), assume_alt_m = 228.6),
+                 "rests on the altitude you stated")
+})
+
+test_that("a missing ALT stays missing by default", {
+  out <- read_narwc(alt_frame(), quiet = TRUE)
+  expect_true(is.na(out$ALT[1]))
+  expect_false("ALT_ASSUMED" %in% names(out))
+})
+
+test_that("an absent ALT column is created when an altitude is stated", {
+  dat <- alt_frame()
+  dat$ALT <- NULL
+  out <- read_narwc(dat, assume_alt_m = 228.6, quiet = TRUE)
+  expect_true(all(out$ALT == 228.6))
+  expect_true(all(out$ALT_ASSUMED))
+})
+
+test_that("a stated altitude survives to the effort criteria", {
+  dat <- alt_frame(alt = c(NA, NA))
+  out <- read_narwc(dat, assume_alt_m = 228.6, quiet = TRUE)
+  expect_equal(sum(flag_effort(out)$OnOff.Effort == 1), 2)
+
+  # And 750 taken as metres does the opposite of what it looks like.
+  high <- read_narwc(dat, assume_alt_m = 750, quiet = TRUE)
+  expect_equal(sum(flag_effort(high)$OnOff.Effort == 1), 0)
+})
+
+test_that("assume_alt_ft converts to metres", {
+  out <- read_narwc(alt_frame(alt = c(NA, NA)), assume_alt_ft = 750,
+                    quiet = TRUE)
+  expect_equal(unique(out$ALT), 750 * 0.3048)
+  # And unlike a literal 750, it leaves the records on effort.
+  expect_equal(sum(flag_effort(out)$OnOff.Effort == 1), 2)
+})
+
+test_that("giving both units is an error", {
+  expect_error(
+    read_narwc(alt_frame(), assume_alt_m = 228.6, assume_alt_ft = 750,
+               quiet = TRUE),
+    "not both"
+  )
+})
