@@ -52,6 +52,13 @@ require_columns <- function(dat, cols, what = "dat", call = rlang::caller_env())
   invisible(dat)
 }
 
+# Does a column carry anything at all? Uses the same definition of missing as
+# `blank_to_na()`, because a column of "." is empty whatever `nzchar()` thinks,
+# and "." is what NARWC writes for missing.
+has_values <- function(x) {
+  any(!is.na(blank_to_na(x)))
+}
+
 # Treat the NARWC missing-value placeholder "." (and blanks) as NA.
 blank_to_na <- function(x) {
   if (!is.character(x)) {

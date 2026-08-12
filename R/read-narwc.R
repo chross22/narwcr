@@ -357,10 +357,9 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
     # And an empty preferred source displaces nothing — taking `TrkLatitude`
     # over a populated `LATITUDE` because the file happens to carry the column
     # would replace real positions with NA.
-    if (!is.null(values) && !any(vapply(src, function(i) {
-      v <- values[[nms[i]]]
-      any(!is.na(v) & (!is.character(v) | nzchar(trimws(v))))
-    }, logical(1)))) next
+    if (!is.null(values) &&
+        !any(vapply(src, function(i) has_values(values[[nms[i]]]),
+                    logical(1)))) next
     keep <- paste0(target, "_ORIGINAL")
     if (keep %in% nms) next
     displaced[target] <- keep
@@ -409,10 +408,8 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
     # carrying both `TrkAltitude_m` and `TrkAltitude_ft` with only the feet one
     # populated would otherwise take the empty column and hand back all NA.
     if (length(claimants) > 1L && !is.null(values)) {
-      filled <- vapply(claimants, function(i) {
-        v <- values[[nms[i]]]
-        any(!is.na(v) & (!is.character(v) | nzchar(trimws(v))))
-      }, logical(1))
+      filled <- vapply(claimants, function(i) has_values(values[[nms[i]]]),
+                       logical(1))
       if (any(filled)) claimants <- claimants[filled]
     }
 

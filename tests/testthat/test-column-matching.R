@@ -653,3 +653,28 @@ test_that("an empty Trk position does not displace a populated LATITUDE", {
   expect_equal(out$LATITUDE, c(43.5, 43.6))
   expect_false("LATITUDE_ORIGINAL" %in% names(out))
 })
+
+test_that("a column of NARWC missing placeholders counts as empty", {
+  # "." is what NARWC writes for missing, and nzchar() disagrees. Reading a
+  # column of them as "populated" is how an empty metres column beat a
+  # populated feet one and emptied ALT on a whole extract.
+  for (blank in c(".", "NA", "na", "", " . ")) {
+    dat <- ev_base(2)
+    dat$EVENTNO <- c("1", "2")
+    dat$TrkAltitude_m <- blank
+    dat$TrkAltitude_ft <- "751.3"
+    expect_equal(read_narwc(dat, quiet = TRUE)$ALT,
+                 rep(751.3 * 0.3048, 2), info = blank)
+  }
+})
+
+test_that("a Trk position of placeholders does not displace a real one", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkLatitude <- "."
+  dat$LATITUDE <- c("43.5", "43.6")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$LATITUDE, c(43.5, 43.6))
+  expect_false("LATITUDE_ORIGINAL" %in% names(out))
+})
