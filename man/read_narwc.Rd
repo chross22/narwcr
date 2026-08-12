@@ -159,7 +159,11 @@ distances in \code{distsamp}. A column whose \emph{name} declares feet — \code
 \code{ALTFT}, \code{ALTITUDEFT} — is multiplied by \code{0.3048} on the way in, and the
 multiplier is recorded in the \code{factor} column of \code{\link[=narwc_column_mapping]{narwc_column_mapping()}}.
 A file carrying both \code{TrkAltitude_m} and \code{TrkAltitude_ft} uses the metres one
-and converts nothing.
+and converts nothing — unless the metres column is empty, in which case the
+feet one is used and converted. Precedence is written over spellings and
+says nothing about which column a file actually filled in, so a column with
+no values in it never outranks one that has them. The same applies to the
+GPS track columns: an empty \code{TrkLatitude} displaces nothing.
 }
 
 \section{Columns that are not in the handbook}{

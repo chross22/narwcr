@@ -612,3 +612,44 @@ test_that("prefer_source = FALSE restores LEGTYPE too", {
 
   expect_equal(read_narwc(dat, prefer_source = FALSE, quiet = TRUE)$LEGTYPE, 9)
 })
+
+# An empty column never outranks a populated one ------------------------------
+
+test_that("an empty metres column does not beat a populated feet one", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkAltitude_m <- c(NA_character_, NA_character_)
+  dat$TrkAltitude_ft <- c("751.3", "751.3")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$ALT, rep(751.3 * 0.3048, 2))
+})
+
+test_that("a blank-string column counts as empty", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkAltitude_m <- c("", "  ")
+  dat$TrkAltitude_ft <- c("751.3", "751.3")
+
+  expect_equal(read_narwc(dat, quiet = TRUE)$ALT, rep(751.3 * 0.3048, 2))
+})
+
+test_that("a populated metres column still wins", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkAltitude_m <- c("229", "229")
+  dat$TrkAltitude_ft <- c("751.3", "751.3")
+
+  expect_equal(read_narwc(dat, quiet = TRUE)$ALT, c(229, 229))
+})
+
+test_that("an empty Trk position does not displace a populated LATITUDE", {
+  dat <- ev_base(2)
+  dat$EVENTNO <- c("1", "2")
+  dat$TrkLatitude <- NA_character_
+  dat$LATITUDE <- c("43.5", "43.6")
+
+  out <- read_narwc(dat, quiet = TRUE)
+  expect_equal(out$LATITUDE, c(43.5, 43.6))
+  expect_false("LATITUDE_ORIGINAL" %in% names(out))
+})

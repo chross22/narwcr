@@ -96,7 +96,11 @@
 #' `ALTFT`, `ALTITUDEFT` — is multiplied by `0.3048` on the way in, and the
 #' multiplier is recorded in the `factor` column of [narwc_column_mapping()].
 #' A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` uses the metres one
-#' and converts nothing.
+#' and converts nothing — unless the metres column is empty, in which case the
+#' feet one is used and converted. Precedence is written over spellings and
+#' says nothing about which column a file actually filled in, so a column with
+#' no values in it never outranks one that has them. The same applies to the
+#' GPS track columns: an empty `TrkLatitude` displaces nothing.
 #'
 #' @section Columns that are not in the handbook:
 #' Survey programmes add their own derived columns, and a processed "ready for
@@ -184,7 +188,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 
   # 1. Resolve input columns onto the canonical names.
   aliases <- schema$aliases
-  resolved <- resolve_columns(names(dat), schema, prefer_source)
+  resolved <- resolve_columns(names(dat), schema, prefer_source, dat)
   if (length(resolved$renames)) {
     names(dat)[match(names(resolved$renames), names(dat))] <-
       unname(resolved$renames)
@@ -334,7 +338,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 # nothing is renamed onto a canonical column that is already present - the
 # real one always wins. Every rename is reported, because a column name is the
 # one piece of provenance a reader has.
-resolve_columns <- function(nms, schema, prefer_source = TRUE) {
+resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   canonical <- c(schema$required, schema$optional)
   norm <- function(x) toupper(gsub("[^A-Za-z0-9]", "", x))
 
@@ -348,7 +352,15 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE) {
   displaced <- character(0)
   for (target in if (prefer_source) names(narwc_preferred_source) else character(0)) {
     if (!target %in% taken) next
-    if (!any(input_norm %in% norm(narwc_preferred_source[[target]]))) next
+    src <- which(input_norm %in% norm(narwc_preferred_source[[target]]))
+    if (!length(src)) next
+    # And an empty preferred source displaces nothing — taking `TrkLatitude`
+    # over a populated `LATITUDE` because the file happens to carry the column
+    # would replace real positions with NA.
+    if (!is.null(values) && !any(vapply(src, function(i) {
+      v <- values[[nms[i]]]
+      any(!is.na(v) & (!is.character(v) | nzchar(trimws(v))))
+    }, logical(1)))) next
     keep <- paste0(target, "_ORIGINAL")
     if (keep %in% nms) next
     displaced[target] <- keep
@@ -390,6 +402,20 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE) {
   for (target in unique(stats::na.omit(wants))) {
     if (target %in% taken) next
     claimants <- which(wants == target)
+
+    # A column with nothing in it cannot outrank one that has data. Priority
+    # is written over spellings — metres before feet, UTC before local — and
+    # says nothing about which column the file actually filled in. A file
+    # carrying both `TrkAltitude_m` and `TrkAltitude_ft` with only the feet one
+    # populated would otherwise take the empty column and hand back all NA.
+    if (length(claimants) > 1L && !is.null(values)) {
+      filled <- vapply(claimants, function(i) {
+        v <- values[[nms[i]]]
+        any(!is.na(v) & (!is.character(v) | nzchar(trimws(v))))
+      }, logical(1))
+      if (any(filled)) claimants <- claimants[filled]
+    }
+
     if (length(claimants) > 1L) {
       # A column whose name *is* the canonical one bar case or punctuation
       # outranks one that only got there through an alias: `Latitude` beats
@@ -790,7 +816,7 @@ standardize_narwc_columns <- function(dat, quiet = FALSE, prefer_source = TRUE) 
   if (!ncol(dat)) {
     return(dat)
   }
-  resolved <- resolve_columns(names(dat), narwc_schema(), prefer_source)
+  resolved <- resolve_columns(names(dat), narwc_schema(), prefer_source, dat)
   if (length(resolved$renames)) {
     names(dat)[match(names(resolved$renames), names(dat))] <-
       unname(resolved$renames)
