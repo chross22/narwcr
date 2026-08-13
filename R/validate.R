@@ -87,6 +87,7 @@ narwc_checks <- function() {
     time_format        = check_time_format,
     coordinates        = check_coordinates,
     sighting_counts    = check_sighting_counts,
+    altitude_units     = check_altitude_units,
     sightno_without_species = check_sightno_without_species,
     sightno_duplicated = check_sightno_duplicates,
     sightno_non_target = check_sightno_non_target,
@@ -130,6 +131,14 @@ narwc_checks <- function() {
 #'   \item{`eventno_not_increasing`}{`EVENTNO` does not increase through a
 #'     `FILEID`. Repeated values are allowed — the handbook (4.2) assigns one
 #'     event several sightings — but decreases indicate mis-sorted records.}
+#'   \item{`altitude_looks_like_feet`}{The median `ALT` is implausible read as
+#'     metres for a survey aircraft and ordinary read as feet. Handbook 8.A.1
+#'     says `ALT` is metres, but also that nearly all submissions arrive in
+#'     feet and that the conversion on import can be switched off — so this is
+#'     an expected state of the data, and it cannot be detected from a column
+#'     name. Left uncorrected, every record above the altitude ceiling drops
+#'     out of effort silently, and `perp_distance()` returns distances 3.28
+#'     times too large.}
 #'   \item{`sightno_without_species`}{`SIGHTNO` is set on records with no
 #'     `SPECCODE`. Handbook 8.A.27: data-logging programs number every forced
 #'     record — line starts, weather and altitude changes — not only sightings,
@@ -637,6 +646,56 @@ check_sightno_non_target <- function(dat) {
       "sharks, sunfish - recorded so they could be removed before analysis ",
       "(handbook 8.A.27). Duplicates of it are expected and are not an error. ",
       "Exclude these before estimating density."
+    )
+  ))
+}
+
+
+# Handbook 8.A.1: "ALT is the aircraft altitude in meters", but "the NARWC data
+# protocol still allows submission of altitudes in feet or meters (nearly all
+# submissions are in feet)", and the feet-to-metres conversion on import "can
+# be switched off simply by putting an asterisk at the beginning". So a column
+# holding feet under a schema that says metres is a documented, expected state
+# of the data rather than an exotic one.
+#
+# It cannot be detected from the column name — the archive that prompted this
+# carried feet in a column called `TrkAltitude_m`. It can be detected from the
+# values: a survey aircraft flies at 500-1500 feet, so an altitude that is
+# implausible read as metres and ordinary read as feet is almost certainly
+# feet. The consequence is silent. `flag_effort()` fails every record above its
+# ceiling, so a whole survey drops out of effort with nothing to say why, and
+# `perp_distance()` is ALT / tan(angle), so every angle-derived distance comes
+# out 3.28 times too large.
+check_altitude_units <- function(dat) {
+  if (!"ALT" %in% names(dat)) {
+    return(NULL)
+  }
+  alt <- suppressWarnings(as.numeric(dat$ALT))
+  if (!any(!is.na(alt))) {
+    return(NULL)
+  }
+
+  med <- stats::median(alt, na.rm = TRUE)
+  as_metres <- med
+  as_feet <- med * 0.3048
+
+  # Implausible as metres for a survey, ordinary as feet.
+  looks_feet <- as_metres > 366 && as_feet >= 50 && as_feet <= 600
+  if (!looks_feet) {
+    return(NULL)
+  }
+
+  bad <- which(!is.na(alt) & alt > 366)
+  list(flag(
+    "altitude_looks_like_feet", "warning", "ALT", bad,
+    paste0(
+      "The median ALT is ", round(med), ", which is implausible as metres for ",
+      "a survey aircraft and ordinary as feet (", round(as_feet), " m). ",
+      "Handbook 8.A.1: ALT is metres, but nearly all submissions are in feet ",
+      "and the conversion on import can be switched off. Left as it is, every ",
+      "record above the altitude ceiling drops out of effort, and any ",
+      "right-angle distance from a declination angle comes out 3.28 times too ",
+      "large."
     )
   ))
 }

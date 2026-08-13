@@ -58,6 +58,14 @@ later legitimately has none.}
 \item{\code{eventno_not_increasing}}{\code{EVENTNO} does not increase through a
 \code{FILEID}. Repeated values are allowed — the handbook (4.2) assigns one
 event several sightings — but decreases indicate mis-sorted records.}
+\item{\code{altitude_looks_like_feet}}{The median \code{ALT} is implausible read as
+metres for a survey aircraft and ordinary read as feet. Handbook 8.A.1
+says \code{ALT} is metres, but also that nearly all submissions arrive in
+feet and that the conversion on import can be switched off — so this is
+an expected state of the data, and it cannot be detected from a column
+name. Left uncorrected, every record above the altitude ceiling drops
+out of effort silently, and \code{perp_distance()} returns distances 3.28
+times too large.}
 \item{\code{sightno_without_species}}{\code{SIGHTNO} is set on records with no
 \code{SPECCODE}. Handbook 8.A.27: data-logging programs number every forced
 record — line starts, weather and altitude changes — not only sightings,

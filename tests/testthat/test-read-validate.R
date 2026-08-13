@@ -143,3 +143,44 @@ test_that("999 is reported as non-target, and not as a duplicate", {
   expect_equal(hit$severity, "note")
   expect_false("sightno_duplicated" %in% f$check)
 })
+
+# Altitude units, handbook 8.A.1 ----------------------------------------------
+
+alt_frame_units <- function(alt) {
+  data.frame(FILEID = "F", EVENTNO = seq_along(alt), ALT = alt,
+             stringsAsFactors = FALSE)
+}
+
+test_that("an altitude in feet is flagged", {
+  f <- validate_narwc(alt_frame_units(rep(c(1000, 1030, 1050), 10)))
+  hit <- f[f$check == "altitude_looks_like_feet", ]
+  expect_equal(nrow(hit), 1)
+  expect_equal(hit$severity, "warning")
+  expect_equal(hit$n, 30)
+})
+
+test_that("an altitude in metres is not flagged", {
+  f <- validate_narwc(alt_frame_units(rep(c(229, 244, 305), 10)))
+  expect_false("altitude_looks_like_feet" %in% f$check)
+})
+
+test_that("an altitude implausible in either unit is not claimed to be feet", {
+  # 9000 m is absurd; 9000 ft is 2743 m, also absurd for a survey. Saying
+  # nothing beats saying the wrong thing.
+  f <- validate_narwc(alt_frame_units(rep(9000, 30)))
+  expect_false("altitude_looks_like_feet" %in% f$check)
+})
+
+test_that("the flagged rows are the ones above the ceiling", {
+  dat <- alt_frame_units(c(rep(1030, 20), 229, 244))
+  f <- validate_narwc(dat)
+  hit <- f[f$check == "altitude_looks_like_feet", ]
+  expect_equal(hit$n, 20)
+})
+
+test_that("no ALT column and an empty one are both silent", {
+  expect_false("altitude_looks_like_feet" %in%
+                 validate_narwc(data.frame(FILEID = "F", EVENTNO = 1))$check)
+  expect_false("altitude_looks_like_feet" %in%
+                 validate_narwc(alt_frame_units(rep(NA_real_, 5)))$check)
+})
