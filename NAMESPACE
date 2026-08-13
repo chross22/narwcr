@@ -2,6 +2,7 @@
 
 export(angles_from_declination)
 export(classify_platform)
+export(fill_legstage)
 export(fill_narwc)
 export(flag_effort)
 export(make_leg_id)
