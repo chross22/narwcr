@@ -250,3 +250,40 @@ test_that("the threshold is an argument", {
   expect_equal(unique(as.character(
     classify_platform(sea, aerial_min = 5))), "aerial")
 })
+
+test_that("off-line records are judged by their own day, not pooled", {
+  # A record on no line has LEGNO3 of NA. Pooling every such record in an
+  # archive into one group gives them all one median speed and one verdict —
+  # and circling records, where many sightings are logged, are all off-line.
+  fast <- speed_frame(51.4, n = 30, legno = "1")          # ~100 kt, on a line
+  fast$DATE <- as.Date("2024-04-01")
+
+  # An off-line stretch on another day, also fast.
+  off <- speed_frame(51.4, n = 30, legno = NA_character_)
+  off$DATE <- as.Date("2024-04-02")
+  off$LEGSTAGE <- NA_real_
+  off$LEGTYPE <- 1
+  off$EVENTNO <- off$EVENTNO + 100
+
+  # A slow off-line stretch on a third day.
+  slow <- speed_frame(5.3, n = 30, legno = NA_character_)
+  slow$DATE <- as.Date("2024-04-03")
+  slow$LEGSTAGE <- NA_real_
+  slow$LEGTYPE <- 1
+  slow$EVENTNO <- slow$EVENTNO + 200
+
+  d <- make_leg_id(rbind(fast, off, slow), quiet = TRUE)
+  kind <- classify_platform(d)
+
+  # The two off-line stretches must not share a verdict.
+  expect_equal(unique(as.character(kind[d$DATE == as.Date("2024-04-02")])),
+               "aerial")
+  expect_equal(unique(as.character(kind[d$DATE == as.Date("2024-04-03")])),
+               "vessel")
+})
+
+test_that("an explicit by is still honoured", {
+  d <- make_leg_id(speed_frame(51.4), quiet = TRUE)
+  expect_equal(unique(as.character(classify_platform(d, by = "DATE"))),
+               "aerial")
+})

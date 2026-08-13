@@ -491,16 +491,7 @@ track_speed <- function(dat, by = NULL, max_gap = 300) {
     return(rep(NA_real_, n))
   }
 
-  if (is.null(by)) {
-    by <- if ("LEGNO3" %in% names(dat)) "LEGNO3" else
-      intersect(c("DATE", "FILEID"), names(dat))
-  }
-  key <- if (length(by)) {
-    do.call(paste, c(lapply(by, function(nm) as.character(dat[[nm]])),
-                     sep = "\r"))
-  } else {
-    rep("", n)
-  }
+  key <- speed_key(dat, by)
 
   tt <- sprintf("%06d", ifelse(is.na(dat$TIME), 0L, as.integer(round(dat$TIME))))
   tsec <- as.numeric(substr(tt, 1, 2)) * 3600 +
@@ -565,17 +556,7 @@ classify_platform <- function(dat, by = NULL, aerial_min = 40,
                               stationary_max = 2, max_gap = 300) {
   kn <- track_speed(dat, by = by, max_gap = max_gap)
   n <- nrow(dat)
-
-  if (is.null(by)) {
-    by <- if ("LEGNO3" %in% names(dat)) "LEGNO3" else
-      intersect(c("DATE", "FILEID"), names(dat))
-  }
-  key <- if (length(by)) {
-    do.call(paste, c(lapply(by, function(nm) as.character(dat[[nm]])),
-                     sep = "\r"))
-  } else {
-    rep("", n)
-  }
+  key <- speed_key(dat, by)
 
   # One label per stretch, from its median. A single interval can be anything -
   # a repeated fix, a dropped second - and a platform does not change mid-line.
@@ -588,4 +569,31 @@ classify_platform <- function(dat, by = NULL, aerial_min = 40,
                   ifelse(per_row >= aerial_min, "aerial", "vessel"))),
     levels = c("stationary", "vessel", "aerial")
   )
+}
+
+
+# The stretches speed is computed and judged over. `LEGNO3` where a record is
+# on a line — but a record on no line has `LEGNO3` of NA, and NA pasted into a
+# key is the single string "NA", which would put every transit, ferry and
+# circling record in an entire archive into one group with one median speed
+# and one verdict. Those fall back to their own day and file, which is the
+# smallest stretch a platform can be judged over when there is no line.
+speed_key <- function(dat, by = NULL) {
+  n <- nrow(dat)
+  paste_cols <- function(cols) {
+    do.call(paste, c(lapply(cols, function(nm) as.character(dat[[nm]])),
+                     sep = "\r"))
+  }
+
+  if (!is.null(by)) {
+    return(if (length(by)) paste_cols(by) else rep("", n))
+  }
+
+  day <- intersect(c("DATE", "FILEID"), names(dat))
+  fallback <- if (length(day)) paste0("day\r", paste_cols(day)) else rep("", n)
+
+  if (!"LEGNO3" %in% names(dat)) {
+    return(fallback)
+  }
+  ifelse(is.na(dat$LEGNO3), fallback, paste0("leg\r", as.character(dat$LEGNO3)))
 }
