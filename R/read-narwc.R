@@ -763,6 +763,24 @@ parse_narwc_time <- function(x) {
   s[!nzchar(s)] <- NA_character_
   out <- suppressWarnings(as.numeric(s))
 
+  # A lubridate period written to CSV prints as "12H 57M 0S". A processing
+  # script that kept its times as periods hands over a whole archive in this
+  # shape - 3,709,805 records on one real file - and `as.numeric()` makes NA
+  # of every one.
+  period <- is.na(out) & !is.na(s) & grepl("[0-9]+[HMS]", s) & !grepl(":", s)
+  if (any(period)) {
+    grab <- function(x, unit) {
+      v <- rep(0, length(x))
+      at <- regexpr(paste0("[0-9.]+(?=", unit, ")"), x, perl = TRUE)
+      got <- at > 0
+      if (any(got)) v[got] <- as.numeric(regmatches(x, at))
+      v
+    }
+    p <- s[period]
+    out[period] <- grab(p, "H") * 10000 + grab(p, "M") * 100 +
+      floor(grab(p, "S"))
+  }
+
   clock <- is.na(out) & !is.na(s) & grepl("[0-9]{1,2}:[0-9]{2}", s)
   if (any(clock)) {
     hit <- regmatches(

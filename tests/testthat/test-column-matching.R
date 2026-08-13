@@ -969,3 +969,23 @@ test_that("only genuinely absent event numbers are invented", {
   out <- read_narwc(dat, quiet = TRUE)
   expect_equal(out$EVENTNO, c(11, 12, 13))   # 12 fits between the recorded pair
 })
+
+test_that("a lubridate period is read as a time", {
+  expect_equal(read_narwc(time_frame("12H 57M 0S"), quiet = TRUE)$TIME, 125700)
+  expect_equal(read_narwc(time_frame("14H 1M 0S"), quiet = TRUE)$TIME, 140100)
+  expect_equal(read_narwc(time_frame("0H 5M 3S"), quiet = TRUE)$TIME, 503)
+})
+
+test_that("a period with parts missing is still read", {
+  expect_equal(read_narwc(time_frame("15H 39M"), quiet = TRUE)$TIME, 153900)
+  expect_equal(read_narwc(time_frame("9H"), quiet = TRUE)$TIME, 90000)
+})
+
+test_that("fractional seconds are truncated, not rounded up", {
+  expect_equal(read_narwc(time_frame("12H 57M 0.9S"), quiet = TRUE)$TIME, 125700)
+})
+
+test_that("the clock formats still work", {
+  expect_equal(read_narwc(time_frame("12:57:00"), quiet = TRUE)$TIME, 125700)
+  expect_equal(read_narwc(time_frame("125700"), quiet = TRUE)$TIME, 125700)
+})
