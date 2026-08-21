@@ -17,3 +17,6 @@ figure/
 
 # Claude Code
 .claude/
+
+# generated pkgdown site
+pkgdown-site/

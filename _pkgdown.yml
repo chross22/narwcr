@@ -1,0 +1,59 @@
+# Served from camilleross.org/narwcr/, not chross22.github.io: GitHub applies
+# the user site's custom domain to every project page on the account. This must
+# name where visitors actually land, or the canonical link, sitemap and og:url
+# all point at a hostname nobody uses and search engines see two of each page.
+url: https://camilleross.org/narwcr/
+
+# NOT docs/. Several of these packages keep hand-written design notes and
+# methods write-ups in docs/, tracked in git, and a pkgdown build would erase
+# them. pkgdown refuses outright when it finds a docs/ it did not create; this
+# names a directory that is unambiguously generated.
+destination: pkgdown-site
+
+template:
+  bootstrap: 5
+  light-switch: true
+
+reference:
+- title: Reading the database
+  desc: >
+    Reading a NARWC extract and putting it into one predictable shape,
+    reconciling the column names different survey programmes use for the
+    same thing.
+  contents:
+  - narwc_cloud_roots
+  - narwc_codes
+  - narwc_column_mapping
+  - narwc_fetch
+  - narwc_profiles
+  - narwc_schema
+  - read_narwc
+  - standardize_narwc_columns
+
+- title: Filling and validating
+  desc: >
+    Checks that report rather than stop, and the fills that are safe to
+    apply. Some columns must never be carried forward; narwc_never_fill()
+    says which.
+  contents:
+  - fill_legstage
+  - fill_narwc
+  - narwc_checks
+  - narwc_fill_columns
+  - narwc_finding
+  - narwc_strip_bins
+  - validate_narwc
+
+- title: Effort and platform
+  desc: >
+    Deriving what the survey was doing from what it recorded: on or off
+    effort, from which platform, at what speed, and whether conditions
+    allowed a sighting.
+  contents:
+  - angles_from_declination
+  - classify_platform
+  - flag_effort
+  - make_leg_id
+  - on_effort_census_rows
+  - track_speed
+  - visibility_ok
