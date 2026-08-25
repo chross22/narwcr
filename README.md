@@ -1,6 +1,6 @@
 # narwcr
 
-Read and standardise North Atlantic Right Whale Consortium (NARWC) survey data.
+Read and standardize North Atlantic Right Whale Consortium (NARWC) survey data.
 
 `narwcr` is the common data preparation layer beneath analysis packages that
 read the same archive but diverge in their modelling methods. It does the part
