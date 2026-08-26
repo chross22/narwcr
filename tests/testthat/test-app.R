@@ -303,3 +303,88 @@ test_that("a relative path in a file box means relative to where the app was lau
                "1AbCdEfGhIjKlMnOpQrStUvWxYz")
   expect_equal(env$resolve_path(""), "")
 })
+
+# ----------------------------------------------------- the app with no PAM ----
+#
+# Acoustic data is optional and most extracts arrive without any. Everything
+# that reads it therefore has to cope with nothing being there, and "cope"
+# means the map still draws rather than the whole page erroring out on a
+# station table nobody asked for.
+
+test_that("every output renders with no acoustic data at all", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  op <- options(narwcr.app_data = NULL, narwcr.app_pam = NULL,
+                narwcr.app_source = NULL)
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(
+      max_beaufort = 3, max_alt = 366, min_vis = 2, na_action = "fail",
+      months = 1:12, types = c("aerial", "vessel", "opportunistic", "unknown"),
+      show_effort = TRUE, show_ferry = TRUE, cluster = TRUE,
+      size_by_number = TRUE, colour_by = "species", effort_only = FALSE,
+      show_bathy = FALSE, contour_depths = c(100, 200)
+    )
+    expect_gt(nrow(prepared()), 0)
+    expect_null(selected_pam())
+    expect_null(pam_stations())
+    expect_gt(nrow(selected_sightings()), 0)
+    # The extent a bathymetry grid would be fetched for still resolves; it is
+    # simply the survey's own.
+    expect_false(is.null(data_extent()))
+
+    for (out in c("stats", "notes", "by_year", "by_type", "by_species",
+                  "by_station", "source_text", "mapping", "type_source",
+                  "pam_mapping", "findings", "type_control", "date_control",
+                  "species_control", "idrel_control", "bathy_res_control",
+                  "bathy_note")) {
+      expect_error(output[[out]], NA, label = out)
+    }
+  })
+})
+
+test_that("the data-type control offers PAM only when there is acoustic data", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  types_offered <- function(pam) {
+    op <- options(narwcr.app_data = NULL, narwcr.app_pam = pam,
+                  narwcr.app_source = NULL)
+    on.exit(options(op), add = TRUE)
+    got <- NULL
+    shiny::testServer(app_dir, {
+      session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                        na_action = "fail", months = 1:12)
+      got <<- output$type_control
+    })
+    got
+  }
+
+  without <- types_offered(NULL)
+  expect_false(grepl("PAM", without$html, fixed = TRUE))
+
+  with <- types_offered(system.file("extdata", "pam-example.csv",
+                                    package = "narwcr"))
+  expect_true(grepl("PAM", with$html, fixed = TRUE))
+  # The label carries a swatch and a count, not just the bare word.
+  expect_true(grepl("nw-swatch", with$html, fixed = TRUE))
+})
+
+test_that("the layer control offers a PAM overlay only when there are stations", {
+  env <- app_env()
+  expect_false("PAM stations" %in% env$overlay_groups(FALSE))
+  expect_true("PAM stations" %in% env$overlay_groups(TRUE))
+  # NULL is what `!is.null(pam())` gives before anything has loaded, and it
+  # must not be read as "yes".
+  expect_false("PAM stations" %in% env$overlay_groups(NULL))
+  expect_true(all(c("Sightings", "On-effort track", "Depth contours") %in%
+                    env$overlay_groups(FALSE)))
+})

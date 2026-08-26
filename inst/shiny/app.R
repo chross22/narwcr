@@ -101,6 +101,15 @@ depth_ramp <- grDevices::colorRampPalette(c("#5d8aa8", "#0b2545"))
 # The depths worth offering. 100 and 200 are the two a North Atlantic right
 # whale distribution is usually read against -- the shelf and the shelf break --
 # and they are what this opens on.
+# The basemaps, and the overlays the control offers. "PAM stations" is only
+# offered when there are stations: a tickbox for a layer that does not exist
+# reads as a layer that is empty, which is a different and much worse claim.
+base_groups <- c("Ocean", "Quiet", "Satellite", "Streets")
+overlay_groups <- function(has_pam) {
+  c("Depth contours", "On-effort track", "Other track", "Sightings",
+    if (isTRUE(has_pam)) "PAM stations")
+}
+
 depth_choices <- c(20, 50, 100, 200, 500, 1000, 2000, 3000, 4000)
 default_depths <- c(100, 200, 1000)
 
@@ -964,19 +973,20 @@ server <- function(input, output, session) {
                   type_colours[[k]], "'></span>", k,
                   " <span style='color:#7a8a95'>(", fmt_int(n), ")</span>"))
     }
-    choices <- stats::setNames(
-      as.list(present),
-      lapply(present, function(k) swatch(k, counts[[k]]))
-    )
+    # `choiceNames` and `choiceValues`, not a named `choices` vector: the label
+    # carries a colour swatch and a count, and names on a character vector are
+    # flattened to text on their way through.
+    labels <- lapply(present, function(k) swatch(k, counts[[k]]))
+    values <- present
+
+    # PAM only when there is acoustic data to draw. A tickbox for a layer that
+    # does not exist reads as a layer that is empty.
     if (!is.null(pam())) {
-      choices <- c(choices, stats::setNames(
-        list("PAM"),
-        list(swatch("PAM", length(unique(pam()$STATION))))
-      ))
+      labels <- c(labels, list(swatch("PAM", length(unique(pam()$STATION)))))
+      values <- c(values, "PAM")
     }
-    checkboxGroupInput("types", NULL, choiceNames = unname(lapply(choices, identity)),
-                       choiceValues = unlist(choices, use.names = FALSE),
-                       selected = unlist(choices, use.names = FALSE))
+    checkboxGroupInput("types", NULL, choiceNames = labels,
+                       choiceValues = values, selected = values)
   })
 
   output$date_control <- renderUI({
@@ -1226,9 +1236,8 @@ server <- function(input, output, session) {
       leaflet::addProviderTiles("Esri.WorldImagery", group = "Satellite") |>
       leaflet::addProviderTiles("OpenStreetMap.Mapnik", group = "Streets") |>
       leaflet::addLayersControl(
-        baseGroups = c("Ocean", "Quiet", "Satellite", "Streets"),
-        overlayGroups = c("Depth contours", "On-effort track", "Other track",
-                          "Sightings", "PAM stations"),
+        baseGroups = base_groups,
+        overlayGroups = overlay_groups(!is.null(st)),
         options = leaflet::layersControlOptions(collapsed = FALSE)
       ) |>
       leaflet::addScaleBar(position = "bottomleft")
@@ -1239,6 +1248,18 @@ server <- function(input, output, session) {
     }
     m
   })
+
+  # An acoustic file loaded after the page opened brings a layer the control
+  # was not built with. Rebuilding it is one call, and leaflet replaces the
+  # control rather than stacking a second one beside it.
+  observeEvent(!is.null(pam()), {
+    leaflet::addLayersControl(
+      leaflet::leafletProxy("map"),
+      baseGroups = base_groups,
+      overlayGroups = overlay_groups(!is.null(pam())),
+      options = leaflet::layersControlOptions(collapsed = FALSE)
+    )
+  }, ignoreInit = TRUE)
 
   # Tracks, one layer per data type so an aerial line and a vessel line are not
   # the same blue. Off-effort track stays grey whatever drew it: what it says is
