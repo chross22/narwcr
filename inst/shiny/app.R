@@ -933,8 +933,19 @@ ui <- fluidPage(
         class = "nw-section", open = NA,
         tags$summary("Effort"),
         div(class = "nw-section-body",
-            checkboxInput("show_effort", "Draw on-effort track", TRUE),
-            checkboxInput("show_ferry", "Draw transit and off-effort track", FALSE),
+            radioButtons(
+              "track_mode", "Track to draw",
+              c("on-effort only" = "effort",
+                "everywhere the platform went" = "all",
+                "none" = "none"),
+              selected = "effort"
+            ),
+            helpText(
+              "Coverage is the second one. On-effort track is what a density ",
+              "estimate is entitled to use; everywhere the platform went is ",
+              "what was actually looked at, transit and circling included, ",
+              "and on an archive that mostly fails a criterion it is most of ",
+              "the survey."),
             helpText(
               "The criteria below are flag_effort()'s arguments. They decide ",
               "which track counts as effort, and nothing else on this page ",
@@ -1056,6 +1067,13 @@ ui <- fluidPage(
                  helpText("LEGTYPE where the observers recorded one, platform ",
                           "speed where they did not."),
                  tableOutput("type_source"),
+                 h4("What LEGTYPE the file carries"),
+                 helpText("Every value in the column and what it was read as. ",
+                          "A value the handbook does not define cannot place a ",
+                          "record, and those records fall to platform speed - ",
+                          "which is a good guess about a platform and no guess ",
+                          "at all about a survey."),
+                 tableOutput("legtype_table"),
                  h4("Acoustic file"), tableOutput("pam_mapping"),
                  h4("Validation"),
                  helpText("validate_narwc(), over the whole table rather than ",
@@ -1159,6 +1177,9 @@ server <- function(input, output, session) {
 
   # ------------------------------------------- controls built from the data ----
 
+  show_effort <- reactive({ (input$track_mode %||% "effort") != "none" })
+  show_ferry <- reactive({ identical(input$track_mode %||% "effort", "all") })
+
   # A `checkboxGroupInput` with nothing ticked sends NULL, and so does one that
   # has not rendered yet. Read as "no filter" - which is the obvious reading -
   # unticking every data type shows every data type, which is the opposite of
@@ -1171,10 +1192,24 @@ server <- function(input, output, session) {
     controls_ready(TRUE)
     present <- levels(droplevels(prepared()$DATATYPE))
     counts <- table(as.character(prepared()$DATATYPE))
+    # A type that was inferred from speed says so here, not three tabs away.
+    # 218 records called "vessel" beside 1.4 million called "aerial" invites
+    # the reading that the file holds a shipboard survey, and where every one
+    # of them was placed by speed it holds no such thing - it holds 218
+    # records nothing could place.
+    src <- as.character(prepared()$TYPESOURCE)
+    type <- as.character(prepared()$DATATYPE)
     swatch <- function(k, n) {
+      guessed <- sum(type == k & src == "speed")
+      note <- if (!guessed) "" else if (guessed == n) {
+        ", all inferred from speed"
+      } else {
+        paste0(", ", fmt_int(guessed), " inferred from speed")
+      }
       HTML(paste0("<span class='nw-swatch' style='background:",
                   type_colours[[k]], "'></span>", k,
-                  " <span style='color:#7a8a95'>(", fmt_int(n), ")</span>"))
+                  " <span style='color:#7a8a95'>(", fmt_int(n), note,
+                  ")</span>"))
     }
     # `choiceNames` and `choiceValues`, not a named `choices` vector: the label
     # carries a colour swatch and a count, and names on a character vector are
@@ -1349,7 +1384,7 @@ server <- function(input, output, session) {
 
   # Which data types have on-effort track on screen, in the handbook's order.
   effort_types <- reactive({
-    if (!isTRUE(input$show_effort)) return(character(0))
+    if (!show_effort()) return(character(0))
     intersect(survey_types, unique(as.character(effort_track()$DATATYPE)))
   })
 
@@ -1582,7 +1617,7 @@ server <- function(input, output, session) {
       invisible()
     }
 
-    if (isTRUE(input$show_ferry)) {
+    if (show_ferry()) {
       draw_track(ferry_track(), ferry_colour, "Other track", 1.5)
     }
     eff <- effort_track()
@@ -1700,7 +1735,7 @@ server <- function(input, output, session) {
       track_rows <- c(track_rows,
                       leg_line(type_colours[[k]], paste0(k, ", on effort"), 3))
     }
-    if (isTRUE(input$show_ferry) && nrow(ferry_track())) {
+    if (show_ferry() && nrow(ferry_track())) {
       track_rows <- c(track_rows,
                       leg_line(ferry_colour, "transit and off effort", 2))
     }
@@ -1806,7 +1841,7 @@ server <- function(input, output, session) {
     # is the same question as "why does this year have no kilometres".
     off <- nrow(ferry_track())
     total <- nrow(mappable())
-    if (total && off && !isTRUE(input$show_ferry)) {
+    if (total && off && !show_ferry()) {
       notes <- c(notes, sprintf(
         paste("%s of the %s positions in this selection are off effort and are",
               "not drawn, so there is no trackline under the sightings made",
@@ -1978,6 +2013,25 @@ server <- function(input, output, session) {
     out <- as.data.frame.matrix(tab)
     data.frame(`Data type` = rownames(out), out, check.names = FALSE,
                row.names = NULL)
+  }, digits = 0)
+
+  output$legtype_table <- renderTable({
+    dat <- prepared()
+    if (!"LEGTYPE" %in% names(dat)) return(NULL)
+    tab <- table(as.character(dat$LEGTYPE), useNA = "ifany")
+    keys <- names(tab)
+    book <- legtype_type_table()
+    meanings <- narwc_codes("LEGTYPE")
+    data.frame(
+      LEGTYPE = ifelse(is.na(keys), "(not recorded)", keys),
+      Records = as.integer(tab),
+      `Handbook 8.A.21` = ifelse(is.na(keys) | !keys %in% names(meanings),
+                                 "-", unname(meanings[keys])),
+      `Read as` = ifelse(is.na(keys) | !keys %in% names(book),
+                         "not recognised - inferred from speed",
+                         unname(book[keys])),
+      check.names = FALSE, row.names = NULL, stringsAsFactors = FALSE
+    )
   }, digits = 0)
 
   output$pam_mapping <- renderTable({

@@ -326,7 +326,7 @@ test_that("every output renders with no acoustic data at all", {
     session$setInputs(
       max_beaufort = 3, max_alt = 366, min_vis = 2, na_action = "fail",
       months = 1:12, types = c("aerial", "vessel", "opportunistic", "unknown"),
-      show_effort = TRUE, show_ferry = TRUE, cluster = TRUE,
+      track_mode = "all", cluster = TRUE,
       size_by_number = TRUE, colour_by = "species", effort_only = FALSE,
       show_bathy = FALSE, contour_depths = c(100, 200)
     )
@@ -347,9 +347,9 @@ test_that("every output renders with no acoustic data at all", {
 
     for (out in c("stats", "notes", "by_year", "by_type", "by_species",
                   "by_station", "source_text", "mapping", "type_source",
-                  "pam_mapping", "findings", "type_control", "date_control",
-                  "species_control", "idrel_control", "bathy_res_control",
-                  "bathy_note")) {
+                  "legtype_table", "pam_mapping", "findings", "type_control",
+                  "date_control", "species_control", "idrel_control",
+                  "bathy_res_control", "bathy_note")) {
       expect_error(output[[out]], NA, label = out)
     }
   })
@@ -437,7 +437,7 @@ test_that("unticking every data type shows no data, and re-ticking brings it bac
   shiny::testServer(app_dir, {
     session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
                       na_action = "fail", months = 1:12, effort_only = FALSE,
-                      show_effort = TRUE, show_ferry = FALSE, cluster = FALSE,
+                      track_mode = "effort", cluster = FALSE,
                       size_by_number = FALSE, colour_by = "species",
                       show_bathy = FALSE)
     everything <- nrow(flagged())
@@ -619,5 +619,72 @@ test_that("a shipboard survey can be put on effort, which needs both halves", {
     session$setInputs(criteria = c("beaufort", "vis"))
     expect_equal(sum(flagged()$OnOff.Effort), nrow(ship))
     expect_gt(nrow(effort_track()), 0)
+  })
+})
+
+
+test_that("coverage is a mode, and it draws the track effort leaves out", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  op <- options(narwcr.app_data = NULL, narwcr.app_pam = NULL,
+                narwcr.app_source = NULL)
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                      na_action = "fail", months = 1:12, types = "aerial",
+                      criteria = c("beaufort", "alt", "vis"), legtypes = "2",
+                      track_mode = "effort")
+    output$type_control
+    expect_true(show_effort())
+    expect_false(show_ferry())
+    # The example carries off-effort positions, and on "effort" they are the
+    # ones not drawn.
+    expect_gt(nrow(ferry_track()), 0)
+
+    session$setInputs(track_mode = "all")
+    expect_true(show_effort())
+    expect_true(show_ferry())
+
+    session$setInputs(track_mode = "none")
+    expect_false(show_effort())
+    expect_equal(effort_types(), character(0))
+  })
+})
+
+test_that("the LEGTYPE table names the values the file carries", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  # One value the handbook defines and one it does not, which is the case
+  # that sends records to the speed fallback.
+  dat <- data.frame(
+    FILEID = "F", EVENTNO = 1:6, YEAR = 2024L, MONTH = 4L, DAY = 1L,
+    TIME = 120000 + (1:6) * 100, LATITUDE = 43, LONGITUDE = -69,
+    LEGTYPE = c(2, 2, 2, 8, 8, NA), LEGSTAGE = NA, LEGNO = NA,
+    DATE = as.Date("2024-04-01"), stringsAsFactors = FALSE
+  )
+  op <- options(narwcr.app_data = dat, narwcr.app_pam = NULL,
+                narwcr.app_source = "test")
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                      na_action = "fail", months = 1:12, legtypes = "2",
+                      criteria = c("beaufort", "alt", "vis"))
+    # `renderTable` hands back the HTML as a string, where `renderUI` hands
+    # back a list carrying one.
+    out <- output$legtype_table
+    expect_match(out, "not recognised", fixed = TRUE)
+    expect_match(out, "not recorded", fixed = TRUE)
+    # The handbook's own words for the value it does define.
+    expect_match(out, "survey line", fixed = TRUE)
   })
 })
