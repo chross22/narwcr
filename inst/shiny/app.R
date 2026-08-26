@@ -413,8 +413,9 @@ sighting_popups <- function(dat, bathy = NULL) {
 # at all while still having every sighting it ever made. That is the failure
 # this package was written about, and the map should be able to say which
 # column caused it rather than leaving a zero on the screen.
-effort_criteria <- function(dat, max_beaufort = 3, max_alt_m = 366,
-                            min_visibility_nmi = 2, na_action = "fail") {
+effort_criteria <- function(dat, legtype_on_effort = 2L, max_beaufort = 3,
+                            max_alt_m = 366, min_visibility_nmi = 2,
+                            na_action = "fail") {
   n <- nrow(dat)
   if (!n) return(NULL)
   resolve <- function(x) {
@@ -432,21 +433,36 @@ effort_criteria <- function(dat, max_beaufort = 3, max_alt_m = 366,
     )
   }
   if ("LEGTYPE" %in% names(dat)) {
-    push("LEGTYPE is a census line (2)",
-         dat$LEGTYPE %in% 2L, !is.na(dat$LEGTYPE))
+    push(paste0("LEGTYPE is ", paste(legtype_on_effort, collapse = " or ")),
+         dat$LEGTYPE %in% legtype_on_effort, !is.na(dat$LEGTYPE))
   }
+  # A dropped criterion keeps its row. "Not recorded: 1,394,338" against
+  # "not applied" is the whole diagnosis in one line, and deleting the row
+  # would take the number that explains the decision away with it.
   if ("BEAUFORT" %in% names(dat)) {
-    push(paste0("BEAUFORT at most ", max_beaufort),
-         dat$BEAUFORT <= max_beaufort, !is.na(dat$BEAUFORT))
+    if (is.null(max_beaufort)) {
+      push("BEAUFORT - not applied", rep(TRUE, n), !is.na(dat$BEAUFORT))
+    } else {
+      push(paste0("BEAUFORT at most ", max_beaufort),
+           dat$BEAUFORT <= max_beaufort, !is.na(dat$BEAUFORT))
+    }
   }
   if ("ALT" %in% names(dat)) {
-    push(paste0("ALT below ", max_alt_m, " m"),
-         dat$ALT < max_alt_m, !is.na(dat$ALT))
+    if (is.null(max_alt_m)) {
+      push("ALT - not applied", rep(TRUE, n), !is.na(dat$ALT))
+    } else {
+      push(paste0("ALT below ", max_alt_m, " m"),
+           dat$ALT < max_alt_m, !is.na(dat$ALT))
+    }
   }
   if ("VISIBLTY" %in% names(dat)) {
-    push(paste0("visibility at least ", min_visibility_nmi, " nmi"),
-         visibility_ok(dat$VISIBLTY, min_nmi = min_visibility_nmi),
-         !is.na(dat$VISIBLTY))
+    if (is.null(min_visibility_nmi)) {
+      push("VISIBLTY - not applied", rep(TRUE, n), !is.na(dat$VISIBLTY))
+    } else {
+      push(paste0("visibility at least ", min_visibility_nmi, " nmi"),
+           visibility_ok(dat$VISIBLTY, min_nmi = min_visibility_nmi),
+           !is.na(dat$VISIBLTY))
+    }
   }
   if (!length(out)) return(NULL)
   do.call(rbind, out)
@@ -923,12 +939,47 @@ ui <- fluidPage(
               "The criteria below are flag_effort()'s arguments. They decide ",
               "which track counts as effort, and nothing else on this page ",
               "changes."),
-            numericInput("max_beaufort", "Highest Beaufort sea state", 3,
-                         min = 0, max = 12, step = 1),
-            numericInput("max_alt", "Highest altitude (m)", 366,
-                         min = 0, step = 10),
-            numericInput("min_vis", "Least visibility (nmi)", 2,
-                         min = 0, step = 0.5),
+            # A dropped altitude ceiling on its own rescues nothing: LEGTYPE
+            # is the criterion before all the others, and the handbook has no
+            # census code for a shipboard survey, so every vessel record is
+            # off effort while this says 2 alone. It has to be a control for
+            # the rest of this section to be able to do anything.
+            selectizeInput(
+              "legtypes", "Leg types that count as effort", multiple = TRUE,
+              choices = stats::setNames(
+                names(narwc_codes("LEGTYPE")),
+                paste0(names(narwc_codes("LEGTYPE")), " - ",
+                       unname(narwc_codes("LEGTYPE")))
+              ),
+              selected = "2",
+              options = list(plugins = list("remove_button"))
+            ),
+            checkboxGroupInput(
+              "criteria", "Criteria that apply",
+              choiceNames = list("sea state (BEAUFORT)", "altitude (ALT)",
+                                 "visibility (VISIBLTY)"),
+              choiceValues = c("beaufort", "alt", "vis"),
+              selected = c("beaufort", "alt", "vis")
+            ),
+            helpText(
+              "Untick one and it is dropped, not widened. A vessel record ",
+              "carries no altitude because it has no altitude to carry, so it ",
+              "fails an altitude ceiling however high it is set - and a whole ",
+              "shipboard survey goes off effort. Dropping the criterion says ",
+              "it does not apply to this platform, which is narrower than ",
+              "ignoring every missing value below."),
+            conditionalPanel(
+              "input.criteria && input.criteria.indexOf('beaufort') > -1",
+              numericInput("max_beaufort", "Highest Beaufort sea state", 3,
+                           min = 0, max = 12, step = 1)),
+            conditionalPanel(
+              "input.criteria && input.criteria.indexOf('alt') > -1",
+              numericInput("max_alt", "Highest altitude (m)", 366,
+                           min = 0, step = 10)),
+            conditionalPanel(
+              "input.criteria && input.criteria.indexOf('vis') > -1",
+              numericInput("min_vis", "Least visibility (nmi)", 2,
+                           min = 0, step = 0.5)),
             selectInput("na_action", "A criterion recorded as missing",
                         c("counts as off effort" = "fail",
                           "is ignored" = "pass")))
@@ -1073,13 +1124,36 @@ server <- function(input, output, session) {
   # Whole-table too, because a criterion is a property of a record and not of a
   # selection: the effort shown for 1999 should not depend on whether 1999 is
   # what happens to be on screen.
+  # A dropped criterion is NULL, not a threshold set so wide it cannot bite.
+  # `flag_effort()` treats the two differently on purpose: a missing value
+  # fails a criterion, so a vessel with no ALT fails an altitude ceiling of
+  # any height, and only NULL says the criterion does not apply at all.
+  criterion <- function(key, value) {
+    if (!controls_ready()) return(value)
+    if (key %in% (input$criteria %||% character(0))) value else NULL
+  }
+
+  effort_args <- reactive({
+    list(
+      legtype_on_effort = if (!controls_ready()) 2L else {
+        suppressWarnings(as.integer(input$legtypes %||% character(0)))
+      },
+      max_beaufort = criterion("beaufort", input$max_beaufort %||% 3),
+      max_alt_m = criterion("alt", input$max_alt %||% 366),
+      min_visibility_nmi = criterion("vis", input$min_vis %||% 2),
+      na_action = input$na_action %||% "fail"
+    )
+  })
+
   flagged <- reactive({
+    args <- effort_args()
     suppressMessages(flag_effort(
       prepared(),
-      max_beaufort = input$max_beaufort %||% 3,
-      max_alt_m = input$max_alt %||% 366,
-      min_visibility_nmi = input$min_vis %||% 2,
-      na_action = input$na_action %||% "fail"
+      legtype_on_effort = args$legtype_on_effort,
+      max_beaufort = args$max_beaufort,
+      max_alt_m = args$max_alt_m,
+      min_visibility_nmi = args$min_visibility_nmi,
+      na_action = args$na_action
     ))
   })
 
@@ -1090,11 +1164,11 @@ server <- function(input, output, session) {
   # unticking every data type shows every data type, which is the opposite of
   # what was asked for. These say which NULL is which. Nothing filters until
   # its control exists; after that, empty means empty.
-  types_ready <- reactiveVal(FALSE)
+  controls_ready <- reactiveVal(FALSE)
   species_ready <- reactiveVal(FALSE)
 
   output$type_control <- renderUI({
-    types_ready(TRUE)
+    controls_ready(TRUE)
     present <- levels(droplevels(prepared()$DATATYPE))
     counts <- table(as.character(prepared()$DATATYPE))
     swatch <- function(k, n) {
@@ -1204,7 +1278,7 @@ server <- function(input, output, session) {
   # aerial data still being in the selection.
   in_types <- reactive({
     dat <- flagged()
-    if (!types_ready()) return(dat)
+    if (!controls_ready()) return(dat)
     dat[as.character(dat$DATATYPE) %in% (input$types %||% character(0)), ,
         drop = FALSE]
   })
@@ -1218,7 +1292,7 @@ server <- function(input, output, session) {
     }
     # `all` and `none` are both offered under the month boxes, and `none` has
     # to mean none.
-    if (types_ready() && "MONTH" %in% names(dat)) {
+    if (controls_ready() && "MONTH" %in% names(dat)) {
       months <- as.integer(input$months %||% character(0))
       if (length(months) < 12L) {
         keep <- keep & !is.na(dat$MONTH) & dat$MONTH %in% months
@@ -1304,7 +1378,7 @@ server <- function(input, output, session) {
       keep <- keep & !is.na(dat$DATE) &
         dat$DATE >= input$dates[1] & dat$DATE <= input$dates[2]
     }
-    if (types_ready()) {
+    if (controls_ready()) {
       months <- as.integer(input$months %||% character(0))
       if (length(months) < 12L) {
         keep <- keep & !is.na(dat$MONTH) & dat$MONTH %in% months
@@ -1725,16 +1799,21 @@ server <- function(input, output, session) {
               "carry no hover label. Narrow the date range to get them back."),
         fmt_int(drawn$lines), fmt_int(max_labelled_lines)))
     }
-    # A selection whose records are all off effort draws no track at all, and
-    # markers floating over empty water look like a map that failed rather
-    # than like a platform of opportunity, which is what they usually are.
-    if (nrow(in_period()) && isTRUE(input$show_effort) &&
-        !nrow(effort_track()) && !isTRUE(input$show_ferry)) {
-      notes <- c(notes, paste(
-        "No record in this selection is on effort, so there is no on-effort",
-        "track to draw. Tick \"Draw transit and off-effort track\" to see",
-        "where the platform went - or loosen the criteria below it."
-      ))
+    # Sightings are drawn whether or not their record was on effort, but the
+    # track is not - so a survey that mostly fails a criterion shows its
+    # transects in the markers and nothing underneath them. That reads as
+    # missing tracklines rather than as off-effort track left undrawn, and it
+    # is the same question as "why does this year have no kilometres".
+    off <- nrow(ferry_track())
+    total <- nrow(mappable())
+    if (total && off && !isTRUE(input$show_ferry)) {
+      notes <- c(notes, sprintf(
+        paste("%s of the %s positions in this selection are off effort and are",
+              "not drawn, so there is no trackline under the sightings made",
+              "on them. Tick \"Draw transit and off-effort track\" to see where",
+              "the platform went, and \"Why records are off effort\" on the",
+              "Summary tab for which criterion put them there."),
+        fmt_int(off), fmt_int(total)))
     }
     inferred <- sum(in_period()$TYPESOURCE == "speed")
     if (inferred > 0L) {
@@ -1820,12 +1899,14 @@ server <- function(input, output, session) {
   output$by_criterion <- renderTable({
     dat <- in_period()
     if (!nrow(dat)) return(NULL)
+    args <- effort_args()
     effort_criteria(
       dat,
-      max_beaufort = input$max_beaufort %||% 3,
-      max_alt_m = input$max_alt %||% 366,
-      min_visibility_nmi = input$min_vis %||% 2,
-      na_action = input$na_action %||% "fail"
+      legtype_on_effort = args$legtype_on_effort,
+      max_beaufort = args$max_beaufort,
+      max_alt_m = args$max_alt_m,
+      min_visibility_nmi = args$min_visibility_nmi,
+      na_action = args$na_action
     )
   }, digits = 0)
 

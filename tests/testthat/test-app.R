@@ -515,11 +515,109 @@ test_that("the effort breakdown names the criterion doing the eliminating", {
   expect_equal(alt$Passing, 0L)
   # The criteria that were recorded still pass, which is what makes the empty
   # one stand out rather than hide in a single overall zero.
-  expect_equal(out$Passing[out$Criterion == "LEGTYPE is a census line (2)"], 10L)
+  expect_equal(out$Passing[grepl("^LEGTYPE is", out$Criterion)], 10L)
 
   # `na_action = "pass"` is the escape hatch, and it shows here too.
   passed <- env$effort_criteria(dat, na_action = "pass")
   expect_equal(passed$Passing[grepl("^ALT", passed$Criterion)], 10L)
 
   expect_null(env$effort_criteria(dat[0, , drop = FALSE]))
+})
+
+test_that("a criterion can be dropped rather than widened", {
+  env <- app_env()
+  # A shipboard survey: no altitude, because there is no altitude to record.
+  dat <- data.frame(LEGTYPE = 2, BEAUFORT = 1, ALT = NA_real_,
+                    VISIBLTY = 5)[rep(1, 10), ]
+
+  applied <- env$effort_criteria(dat, max_alt_m = 366)
+  expect_equal(applied$Passing[grepl("^ALT below", applied$Criterion)], 0L)
+
+  # A ceiling set impossibly high does not rescue it: a missing value fails a
+  # criterion however wide the threshold. Only dropping the criterion does.
+  wide <- env$effort_criteria(dat, max_alt_m = 1e6)
+  expect_equal(wide$Passing[grepl("^ALT below", wide$Criterion)], 0L)
+
+  dropped <- env$effort_criteria(dat, max_alt_m = NULL)
+  row <- dropped[dropped$Criterion == "ALT - not applied", ]
+  expect_equal(nrow(row), 1L)
+  expect_equal(row$Passing, 10L)
+  # The count that explains the decision stays on the row.
+  expect_equal(row$`Not recorded`, 10L)
+  # And the other criteria are untouched, which is the point of dropping one
+  # rather than ignoring every missing value.
+  expect_true(any(grepl("^BEAUFORT at most", dropped$Criterion)))
+})
+
+test_that("unticking a criterion in the app drops it from flag_effort", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  op <- options(narwcr.app_data = NULL, narwcr.app_pam = NULL,
+                narwcr.app_source = NULL)
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                      na_action = "fail", months = 1:12, types = "aerial",
+                      criteria = c("beaufort", "alt", "vis"))
+    output$type_control
+    expect_equal(effort_args()$max_alt_m, 366)
+
+    session$setInputs(criteria = c("beaufort", "vis"))
+    expect_null(effort_args()$max_alt_m)
+    expect_equal(effort_args()$max_beaufort, 3)
+
+    session$setInputs(criteria = character(0))
+    expect_null(effort_args()$max_beaufort)
+    expect_null(effort_args()$min_visibility_nmi)
+    # LEGTYPE is not one of the three and still governs, so this is not the
+    # same as calling everything on effort.
+    expect_lt(sum(flagged()$OnOff.Effort), nrow(flagged()))
+  })
+})
+
+test_that("a shipboard survey can be put on effort, which needs both halves", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  # A vessel: shipboard LEGTYPE, no altitude, because it has none to record.
+  ship <- data.frame(
+    FILEID = "V01", EVENTNO = 1:20, YEAR = 2024L, MONTH = 6L, DAY = 1L,
+    TIME = 100000 + (1:20) * 100, LATITUDE = 43 + (1:20) * 0.01,
+    LONGITUDE = -66, LEGTYPE = 5, LEGSTAGE = NA, LEGNO = NA,
+    ALT = NA_real_, BEAUFORT = 2, VISIBLTY = 5, SPECCODE = NA, NUMBER = NA,
+    DATE = as.Date("2024-06-01"), stringsAsFactors = FALSE
+  )
+  op <- options(narwcr.app_data = ship, narwcr.app_pam = NULL,
+                narwcr.app_source = "test")
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                      na_action = "fail", months = 1:12,
+                      criteria = c("beaufort", "alt", "vis"), legtypes = "2")
+    output$type_control
+    session$setInputs(types = "vessel")
+
+    # LEGTYPE 5 is not a census line, so nothing is on effort however the
+    # other criteria are set.
+    expect_equal(sum(flagged()$OnOff.Effort), 0L)
+
+    # Counting shipboard legs is not enough on its own: ALT is NA and a
+    # missing value fails a criterion, so the altitude ceiling still bites.
+    session$setInputs(legtypes = c("2", "5"))
+    expect_equal(sum(flagged()$OnOff.Effort), 0L)
+
+    # Both halves together are what puts the survey on effort.
+    session$setInputs(criteria = c("beaufort", "vis"))
+    expect_equal(sum(flagged()$OnOff.Effort), nrow(ship))
+    expect_gt(nrow(effort_track()), 0)
+  })
 })
