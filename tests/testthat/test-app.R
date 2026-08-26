@@ -333,6 +333,13 @@ test_that("every output renders with no acoustic data at all", {
     expect_gt(nrow(prepared()), 0)
     expect_null(selected_pam())
     expect_null(pam_stations())
+
+    # A browser sends a rendered control's value straight back; `testServer`
+    # does not, so the round trip has to be made by hand or every sighting
+    # filters out against an input that was never set.
+    output$species_control
+    output$idrel_control
+    session$setInputs(species = species_codes(), idrel = idrel_codes())
     expect_gt(nrow(selected_sightings()), 0)
     # The extent a bathymetry grid would be fetched for still resolves; it is
     # simply the survey's own.
@@ -407,4 +414,112 @@ test_that("an installation with no app in it says so, and says where to look", {
   expect_match(err, "no `shiny/` directory", fixed = TRUE)
   expect_match(err, "/somewhere/narwcr", fixed = TRUE)
   expect_match(err, "restart R", fixed = TRUE)
+})
+
+# ------------------------------------------- an empty selection means empty ----
+#
+# `checkboxGroupInput` sends NULL when nothing is ticked and NULL again before
+# it has rendered. Reading both as "no filter" - the obvious reading, and the
+# one this app shipped with - makes unticking every data type show every data
+# type, and makes the "none" link under the months show all twelve.
+
+test_that("unticking every data type shows no data, and re-ticking brings it back", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  op <- options(narwcr.app_data = NULL, narwcr.app_pam = NULL,
+                narwcr.app_source = NULL)
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                      na_action = "fail", months = 1:12, effort_only = FALSE,
+                      show_effort = TRUE, show_ferry = FALSE, cluster = FALSE,
+                      size_by_number = FALSE, colour_by = "species",
+                      show_bathy = FALSE)
+    everything <- nrow(flagged())
+    expect_gt(everything, 0)
+    output$type_control      # render it, so the app knows the control exists
+    output$species_control
+
+    session$setInputs(types = character(0))
+    expect_equal(nrow(in_types()), 0L)
+    expect_equal(nrow(selected_sightings()), 0L)
+    expect_equal(nrow(effort_track()), 0L)
+
+    # The shipped example is aerial throughout, so ticking it back on is the
+    # whole table again.
+    session$setInputs(types = "aerial")
+    expect_equal(nrow(in_types()), everything)
+  })
+})
+
+test_that("the months `none` link means none", {
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("leaflet")
+  skip_if_not_installed("DT")
+  app_dir <- system.file("shiny", package = "narwcr")
+  skip_if(!nzchar(app_dir), "app not installed")
+
+  op <- options(narwcr.app_data = NULL, narwcr.app_pam = NULL,
+                narwcr.app_source = NULL)
+  on.exit(options(op), add = TRUE)
+
+  shiny::testServer(app_dir, {
+    session$setInputs(max_beaufort = 3, max_alt = 366, min_vis = 2,
+                      na_action = "fail", months = 1:12, types = "aerial",
+                      effort_only = FALSE)
+    output$type_control
+    expect_gt(nrow(in_period()), 0)
+
+    session$setInputs(months = character(0))
+    expect_equal(nrow(in_period()), 0L)
+
+    session$setInputs(months = 4)
+    expect_gt(nrow(in_period()), 0)
+    session$setInputs(months = 7)
+    expect_equal(nrow(in_period()), 0L)   # the example is April
+  })
+})
+
+test_that("the legend names what is drawn, and says when nothing is", {
+  env <- app_env()
+  expect_match(env$build_legend(list()), "Nothing is drawn")
+  expect_match(env$build_legend(list(list(title = "Track", rows = character(0)))),
+               "Nothing is drawn")
+
+  html <- env$build_legend(list(
+    list(title = "Species", rows = env$leg_dot("#E69F00", "RIWH - right whale")),
+    list(title = "Track", rows = env$leg_line("#0072B2", "aerial, on effort"))
+  ))
+  expect_match(html, "RIWH - right whale", fixed = TRUE)
+  expect_match(html, "aerial, on effort", fixed = TRUE)
+  expect_match(html, "#E69F00", fixed = TRUE)
+  expect_false(grepl("Nothing is drawn", html, fixed = TRUE))
+})
+
+
+test_that("the effort breakdown names the criterion doing the eliminating", {
+  env <- app_env()
+  # A year that stopped recording altitude: every record fails the ceiling on a
+  # missing value, so the survey has no effort and all of its sightings.
+  dat <- data.frame(
+    LEGTYPE = 2, BEAUFORT = 1, ALT = NA_real_, VISIBLTY = 5
+  )[rep(1, 10), ]
+  out <- env$effort_criteria(dat)
+  alt <- out[grepl("^ALT", out$Criterion), ]
+  expect_equal(alt$`Not recorded`, 10L)
+  expect_equal(alt$Passing, 0L)
+  # The criteria that were recorded still pass, which is what makes the empty
+  # one stand out rather than hide in a single overall zero.
+  expect_equal(out$Passing[out$Criterion == "LEGTYPE is a census line (2)"], 10L)
+
+  # `na_action = "pass"` is the escape hatch, and it shows here too.
+  passed <- env$effort_criteria(dat, na_action = "pass")
+  expect_equal(passed$Passing[grepl("^ALT", passed$Criterion)], 10L)
+
+  expect_null(env$effort_criteria(dat[0, , drop = FALSE]))
 })

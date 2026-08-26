@@ -405,6 +405,101 @@ sighting_popups <- function(dat, bathy = NULL) {
   )
 }
 
+# Which of `flag_effort()`'s criteria is doing the eliminating.
+#
+# "0 km of effort in 2024" and "1,254 sightings in 2024" are both true at once
+# whenever a criterion's column is empty for that era: a missing value fails a
+# criterion by default, so a year that stopped recording altitude has no effort
+# at all while still having every sighting it ever made. That is the failure
+# this package was written about, and the map should be able to say which
+# column caused it rather than leaving a zero on the screen.
+effort_criteria <- function(dat, max_beaufort = 3, max_alt_m = 366,
+                            min_visibility_nmi = 2, na_action = "fail") {
+  n <- nrow(dat)
+  if (!n) return(NULL)
+  resolve <- function(x) {
+    x[is.na(x)] <- (na_action == "pass")
+    x
+  }
+  out <- list()
+  push <- function(label, raw, present) {
+    out[[length(out) + 1L]] <<- data.frame(
+      Criterion = label,
+      `Not recorded` = sum(!present),
+      Passing = sum(resolve(raw)),
+      `Passing %` = sprintf("%.1f%%", 100 * sum(resolve(raw)) / n),
+      check.names = FALSE, stringsAsFactors = FALSE
+    )
+  }
+  if ("LEGTYPE" %in% names(dat)) {
+    push("LEGTYPE is a census line (2)",
+         dat$LEGTYPE %in% 2L, !is.na(dat$LEGTYPE))
+  }
+  if ("BEAUFORT" %in% names(dat)) {
+    push(paste0("BEAUFORT at most ", max_beaufort),
+         dat$BEAUFORT <= max_beaufort, !is.na(dat$BEAUFORT))
+  }
+  if ("ALT" %in% names(dat)) {
+    push(paste0("ALT below ", max_alt_m, " m"),
+         dat$ALT < max_alt_m, !is.na(dat$ALT))
+  }
+  if ("VISIBLTY" %in% names(dat)) {
+    push(paste0("visibility at least ", min_visibility_nmi, " nmi"),
+         visibility_ok(dat$VISIBLTY, min_nmi = min_visibility_nmi),
+         !is.na(dat$VISIBLTY))
+  }
+  if (!length(out)) return(NULL)
+  do.call(rbind, out)
+}
+
+# ---------------------------------------------------------------- legend ----
+#
+# One legend rather than four. leaflet will happily stack a legend per layer,
+# and that is how the map ended up saying nothing at all in the one case where
+# a reader most needs telling: a selection that draws nothing draws no legend
+# either, so an empty map and a broken map look identical.
+#
+# This one is always on screen. It names exactly what is drawn, and when that
+# is nothing it says so.
+
+leg_dot <- function(colour, label) {
+  paste0("<div class='nw-leg-row'><span class='nw-leg-dot' style='background:",
+         colour, "'></span><span>", label, "</span></div>")
+}
+
+leg_line <- function(colour, label, weight = 3) {
+  paste0("<div class='nw-leg-row'><span class='nw-leg-line' style='border-top-width:",
+         weight, "px; border-top-color:", colour, "'></span><span>", label,
+         "</span></div>")
+}
+
+leg_ring <- function(label) {
+  paste0("<div class='nw-leg-row'><span class='nw-leg-ring'></span><span>",
+         label, "</span></div>")
+}
+
+leg_ramp <- function(colours, from, to) {
+  paste0("<div class='nw-leg-ramp' style='background:linear-gradient(to right,",
+         paste(colours, collapse = ","), ")'></div>",
+         "<div class='nw-leg-ends'><span>", from, "</span><span>", to,
+         "</span></div>")
+}
+
+build_legend <- function(sections) {
+  keep <- Filter(function(sec) length(sec$rows) > 0L, sections)
+  if (!length(keep)) {
+    return(paste0(
+      "<div class='nw-leg'><div class='nw-leg-none'>Nothing is drawn for ",
+      "this selection.</div></div>"
+    ))
+  }
+  body <- vapply(keep, function(sec) {
+    paste0("<div class='nw-leg-title'>", sec$title, "</div>",
+           paste(sec$rows, collapse = ""))
+  }, character(1))
+  paste0("<div class='nw-leg'>", paste(body, collapse = ""), "</div>")
+}
+
 # ------------------------------------------------------------ bathymetry ----
 #
 # Depth contours cut from a grid, rather than a basemap that happens to be
@@ -750,6 +845,24 @@ ui <- fluidPage(
     .well { background: #fff; }
     .nw-swatch { display: inline-block; width: 10px; height: 10px;
                  border-radius: 2px; margin-right: 6px; }
+    .nw-leg { background: rgba(255,255,255,0.92); padding: 8px 11px;
+              border-radius: 5px; box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+              font-size: 12px; line-height: 1.5; max-height: 340px;
+              overflow-y: auto; max-width: 250px; }
+    .nw-leg-title { font-weight: 600; font-size: 11px; text-transform: uppercase;
+                    letter-spacing: 0.04em; color: #5b6b76; margin: 6px 0 2px 0; }
+    .nw-leg-title:first-child { margin-top: 0; }
+    .nw-leg-row { display: flex; align-items: center; gap: 7px; }
+    .nw-leg-dot { flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%;
+                  border: 1px solid #2b2b2b; }
+    .nw-leg-ring { flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%;
+                   border: 3px solid #CC79A7; }
+    .nw-leg-line { flex: 0 0 auto; width: 16px; height: 0;
+                   border-top-style: solid; }
+    .nw-leg-ramp { height: 9px; border-radius: 2px; margin: 2px 0 1px 0; }
+    .nw-leg-ends { display: flex; justify-content: space-between;
+                   font-size: 10px; color: #5b6b76; }
+    .nw-leg-none { color: #7a5c00; }
   "))),
 
   div(class = "nw-header",
@@ -873,6 +986,13 @@ ui <- fluidPage(
         tabPanel("Summary", br(),
                  h4("By year"), tableOutput("by_year"),
                  h4("By data type"), tableOutput("by_type"),
+                 h4("Why records are off effort"),
+                 helpText("Each of flag_effort()'s criteria against the ",
+                          "current selection. A criterion whose column is not ",
+                          "recorded fails every record it covers, which is how ",
+                          "a whole era of survey ends up with no effort and ",
+                          "all of its sightings."),
+                 tableOutput("by_criterion"),
                  h4("By species"), tableOutput("by_species"),
                  h4("Acoustic stations"), tableOutput("by_station")),
         tabPanel("Source", br(),
@@ -965,7 +1085,16 @@ server <- function(input, output, session) {
 
   # ------------------------------------------- controls built from the data ----
 
+  # A `checkboxGroupInput` with nothing ticked sends NULL, and so does one that
+  # has not rendered yet. Read as "no filter" - which is the obvious reading -
+  # unticking every data type shows every data type, which is the opposite of
+  # what was asked for. These say which NULL is which. Nothing filters until
+  # its control exists; after that, empty means empty.
+  types_ready <- reactiveVal(FALSE)
+  species_ready <- reactiveVal(FALSE)
+
   output$type_control <- renderUI({
+    types_ready(TRUE)
     present <- levels(droplevels(prepared()$DATATYPE))
     counts <- table(as.character(prepared()$DATATYPE))
     swatch <- function(k, n) {
@@ -1010,30 +1139,52 @@ server <- function(input, output, session) {
     if (!length(d)) NULL else range(d)
   })
 
-  output$species_control <- renderUI({
-    codes <- sort(unique(trimws(as.character(sightings_of(prepared())$SPECCODE))))
-    if (!is.null(pam())) {
-      codes <- sort(unique(c(codes, trimws(as.character(pam()$SPECIES)))))
+  # A selection the user made themselves is kept where it still applies, so
+  # that switching a data type off does not silently re-tick every species
+  # they had narrowed down to.
+  keep_selected <- function(previous, available) {
+    if (is.null(previous)) return(available)
+    still <- intersect(previous, available)
+    if (length(still)) still else available
+  }
+
+  # The species there are to choose from, so that "none chosen" can be told
+  # apart from "nothing to choose".
+  species_codes <- reactive({
+    codes <- sort(unique(trimws(as.character(sightings_of(in_types())$SPECCODE))))
+    if (!is.null(selected_pam_all())) {
+      codes <- sort(unique(c(codes, trimws(as.character(selected_pam_all()$SPECIES)))))
     }
-    if (!length(codes)) return(helpText("No sightings in this extract."))
+    codes[nzchar(codes)]
+  })
+
+  idrel_codes <- reactive({
+    as.character(sort(unique(stats::na.omit(sightings_of(in_types())$IDREL))))
+  })
+
+  output$species_control <- renderUI({
+    species_ready(TRUE)
+    codes <- species_codes()
+    if (!length(codes)) {
+      return(helpText("No sightings in the data types now selected."))
+    }
     selectizeInput(
       "species", "Species", multiple = TRUE,
       choices = stats::setNames(codes, species_label(codes)),
-      selected = codes,
+      selected = keep_selected(isolate(input$species), codes),
       options = list(plugins = list("remove_button"))
     )
   })
 
   output$idrel_control <- renderUI({
-    have <- sort(unique(stats::na.omit(sightings_of(prepared())$IDREL)))
-    if (!length(have)) return(NULL)
-    codes <- as.character(have)
+    codes <- idrel_codes()
+    if (!length(codes)) return(NULL)
     checkboxGroupInput(
       "idrel", "Identification reliability",
       choices = stats::setNames(
         codes, vapply(codes, function(k) code_meaning("IDREL", k), character(1))
       ),
-      selected = codes
+      selected = keep_selected(isolate(input$idrel), codes)
     )
   })
 
@@ -1047,19 +1198,31 @@ server <- function(input, output, session) {
   # One time window and one data-type selection, applied to every record --
   # track, sighting and station alike, so the effort on screen is the effort
   # that produced the sightings on screen.
-  in_period <- reactive({
+  # The data-type filter, on its own, because the species and reliability
+  # controls have to read it too: offering a species that only the aerial
+  # survey ever recorded, while the aerial survey is switched off, reads as
+  # aerial data still being in the selection.
+  in_types <- reactive({
     dat <- flagged()
+    if (!types_ready()) return(dat)
+    dat[as.character(dat$DATATYPE) %in% (input$types %||% character(0)), ,
+        drop = FALSE]
+  })
+
+  in_period <- reactive({
+    dat <- in_types()
     keep <- rep(TRUE, nrow(dat))
     if (!is.null(input$dates)) {
       keep <- keep & !is.na(dat$DATE) &
         dat$DATE >= input$dates[1] & dat$DATE <= input$dates[2]
     }
-    months <- as.integer(input$months %||% 1:12)
-    if (length(months) < 12L && "MONTH" %in% names(dat)) {
-      keep <- keep & !is.na(dat$MONTH) & dat$MONTH %in% months
-    }
-    if (!is.null(input$types)) {
-      keep <- keep & as.character(dat$DATATYPE) %in% input$types
+    # `all` and `none` are both offered under the month boxes, and `none` has
+    # to mean none.
+    if (types_ready() && "MONTH" %in% names(dat)) {
+      months <- as.integer(input$months %||% character(0))
+      if (length(months) < 12L) {
+        keep <- keep & !is.na(dat$MONTH) & dat$MONTH %in% months
+      }
     }
     dat[keep, , drop = FALSE]
   })
@@ -1072,17 +1235,48 @@ server <- function(input, output, session) {
   selected_sightings <- reactive({
     dat <- sightings_of(mappable())
     if (!nrow(dat)) return(dat)
-    if (!is.null(input$species)) {
-      dat <- dat[trimws(as.character(dat$SPECCODE)) %in% input$species, , drop = FALSE]
+    if (species_ready() && length(species_codes())) {
+      dat <- dat[trimws(as.character(dat$SPECCODE)) %in%
+                   (input$species %||% character(0)), , drop = FALSE]
     }
-    if (!is.null(input$idrel) && "IDREL" %in% names(dat)) {
-      dat <- dat[is.na(dat$IDREL) |
-                   as.character(dat$IDREL) %in% input$idrel, , drop = FALSE]
+    if (species_ready() && length(idrel_codes()) && "IDREL" %in% names(dat)) {
+      dat <- dat[is.na(dat$IDREL) | as.character(dat$IDREL) %in%
+                   (input$idrel %||% character(0)), , drop = FALSE]
     }
     if (isTRUE(input$effort_only)) {
       dat <- dat[dat$OnOff.Effort == 1L, , drop = FALSE]
     }
     dat
+  })
+
+  # How the sightings on screen are grouped and coloured, decided once. The
+  # legend and the markers have to agree, and the only way to be sure of that
+  # is for both to read the same answer rather than each working it out.
+  sighting_groups <- reactive({
+    dat <- selected_sightings()
+    if (!nrow(dat)) return(NULL)
+    by_type <- identical(input$colour_by, "type")
+    grp <- if (by_type) {
+      droplevels(factor(as.character(dat$DATATYPE), levels = survey_types))
+    } else {
+      lump_species(trimws(as.character(dat$SPECCODE)))
+    }
+    cols <- if (by_type) {
+      unname(type_colours[levels(grp)])
+    } else {
+      okabe_ito[seq_len(nlevels(grp))]
+    }
+    list(
+      grp = grp, cols = cols, fill = cols[as.integer(grp)],
+      labels = if (by_type) levels(grp) else species_label(levels(grp)),
+      title = if (by_type) "Data type" else "Species"
+    )
+  })
+
+  # Which data types have on-effort track on screen, in the handbook's order.
+  effort_types <- reactive({
+    if (!isTRUE(input$show_effort)) return(character(0))
+    intersect(survey_types, unique(as.character(effort_track()$DATATYPE)))
   })
 
   effort_track <- reactive({
@@ -1095,21 +1289,30 @@ server <- function(input, output, session) {
     dat[dat$OnOff.Effort == 0L, , drop = FALSE]
   })
 
-  selected_pam <- reactive({
+  selected_pam_all <- reactive({
     dat <- pam()
     if (is.null(dat)) return(NULL)
     if (!is.null(input$types) && !"PAM" %in% input$types) return(NULL)
+    dat
+  })
+
+  selected_pam <- reactive({
+    dat <- selected_pam_all()
+    if (is.null(dat)) return(NULL)
     keep <- rep(TRUE, nrow(dat))
     if (!is.null(input$dates)) {
       keep <- keep & !is.na(dat$DATE) &
         dat$DATE >= input$dates[1] & dat$DATE <= input$dates[2]
     }
-    months <- as.integer(input$months %||% 1:12)
-    if (length(months) < 12L) {
-      keep <- keep & !is.na(dat$MONTH) & dat$MONTH %in% months
+    if (types_ready()) {
+      months <- as.integer(input$months %||% character(0))
+      if (length(months) < 12L) {
+        keep <- keep & !is.na(dat$MONTH) & dat$MONTH %in% months
+      }
     }
-    if (!is.null(input$species)) {
-      keep <- keep & trimws(as.character(dat$SPECIES)) %in% input$species
+    if (species_ready() && length(species_codes())) {
+      keep <- keep & trimws(as.character(dat$SPECIES)) %in%
+        (input$species %||% character(0))
     }
     dat[keep, , drop = FALSE]
   })
@@ -1268,7 +1471,6 @@ server <- function(input, output, session) {
     map <- leaflet::leafletProxy("map")
     leaflet::clearGroup(map, "On-effort track")
     leaflet::clearGroup(map, "Other track")
-    leaflet::removeControl(map, "type-legend")
 
     dropped <- 0L; every <- 1L; merged <- FALSE; lines <- 0L
 
@@ -1309,20 +1511,10 @@ server <- function(input, output, session) {
     if (isTRUE(input$show_ferry)) {
       draw_track(ferry_track(), ferry_colour, "Other track", 1.5)
     }
-    if (isTRUE(input$show_effort)) {
-      eff <- effort_track()
-      shown <- intersect(survey_types, unique(as.character(eff$DATATYPE)))
-      for (k in shown) {
-        draw_track(eff[as.character(eff$DATATYPE) == k, , drop = FALSE],
-                   type_colours[[k]], "On-effort track", 2.5)
-      }
-      if (length(shown) > 1L) {
-        leaflet::addLegend(
-          map, position = "topright", layerId = "type-legend",
-          colors = unname(type_colours[shown]), labels = shown,
-          title = "On-effort track", opacity = 0.9
-        )
-      }
+    eff <- effort_track()
+    for (k in effort_types()) {
+      draw_track(eff[as.character(eff$DATATYPE) == k, , drop = FALSE],
+                 type_colours[[k]], "On-effort track", 2.5)
     }
 
     drawn$dropped <- dropped
@@ -1334,23 +1526,10 @@ server <- function(input, output, session) {
   observe({
     map <- leaflet::leafletProxy("map")
     leaflet::clearGroup(map, "Sightings")
-    leaflet::removeControl(map, "sighting-legend")
 
     dat <- selected_sightings()
-    if (!nrow(dat)) return()
-
-    by_type <- identical(input$colour_by, "type")
-    grp <- if (by_type) {
-      droplevels(factor(as.character(dat$DATATYPE), levels = survey_types))
-    } else {
-      lump_species(trimws(as.character(dat$SPECCODE)))
-    }
-    cols <- if (by_type) {
-      unname(type_colours[levels(grp)])
-    } else {
-      okabe_ito[seq_len(nlevels(grp))]
-    }
-    fill <- cols[as.integer(grp)]
+    groups <- sighting_groups()
+    if (!nrow(dat) || is.null(groups)) return()
 
     number <- suppressWarnings(as.numeric(dat$NUMBER))
     radius <- if (isTRUE(input$size_by_number) && any(!is.na(number))) {
@@ -1371,18 +1550,10 @@ server <- function(input, output, session) {
     leaflet::addCircleMarkers(
       map, lng = dat$LONGITUDE, lat = dat$LATITUDE, group = "Sightings",
       radius = radius, color = "#2b2b2b", weight = 0.7, opacity = 0.9,
-      fillColor = fill, fillOpacity = 0.85,
+      fillColor = groups$fill, fillOpacity = 0.85,
       popup = sighting_popups(dat, bathy = bathy_grid()),
       label = species_label(dat$SPECCODE),
       clusterOptions = cluster
-    )
-    # Named by hand rather than through `pal`/`values`, so the legend reads
-    # "RIWH - North Atlantic right whale" and the code stays on it.
-    leaflet::addLegend(
-      map, position = "bottomright", colors = cols,
-      labels = if (by_type) levels(grp) else species_label(levels(grp)),
-      title = if (by_type) "Data type" else "Species",
-      layerId = "sighting-legend", opacity = 0.9
     )
   })
 
@@ -1392,7 +1563,6 @@ server <- function(input, output, session) {
   observe({
     map <- leaflet::leafletProxy("map")
     leaflet::clearGroup(map, "PAM stations")
-    leaflet::removeControl(map, "pam-legend")
 
     st <- pam_stations()
     if (is.null(st) || !nrow(st)) return()
@@ -1414,15 +1584,6 @@ server <- function(input, output, session) {
                       ifelse(is.na(st$rate), "?", round(100 * st$rate)),
                       fmt_int(st$days))
     )
-    leaflet::addLegend(
-      # Same corner as the species legend, so neither lands on the scale bar,
-      # and a rate read as a percentage rather than as a fraction.
-      map, position = "bottomright", pal = pal, values = c(0, 1),
-      title = "Detection rate", layerId = "pam-legend", opacity = 0.9,
-      labFormat = leaflet::labelFormat(
-        suffix = "%", transform = function(x) 100 * x
-      )
-    )
   })
 
   # Contours under everything else. One call per depth, its pieces separated by
@@ -1431,7 +1592,6 @@ server <- function(input, output, session) {
   observe({
     map <- leaflet::leafletProxy("map")
     leaflet::clearGroup(map, "Depth contours")
-    leaflet::removeControl(map, "depth-legend")
 
     cs <- bathy_contours()
     if (is.null(cs) || !length(cs)) return()
@@ -1445,11 +1605,58 @@ server <- function(input, output, session) {
         label = paste0(depths[i], " m")
       )
     }
-    leaflet::addLegend(
-      map, position = "bottomleft", layerId = "depth-legend",
-      colors = cols, labels = paste0(depths, " m"),
-      title = "Depth", opacity = 0.9
-    )
+  })
+
+  # The legend. Always on screen, naming exactly what is drawn - and saying so
+  # when that is nothing, which is the case the four separate legends used to
+  # leave blank.
+  observe({
+    sections <- list()
+
+    groups <- sighting_groups()
+    if (!is.null(groups)) {
+      sections <- c(sections, list(list(
+        title = groups$title,
+        rows = mapply(leg_dot, groups$cols, groups$labels, USE.NAMES = FALSE)
+      )))
+    }
+
+    track_rows <- character(0)
+    for (k in effort_types()) {
+      track_rows <- c(track_rows,
+                      leg_line(type_colours[[k]], paste0(k, ", on effort"), 3))
+    }
+    if (isTRUE(input$show_ferry) && nrow(ferry_track())) {
+      track_rows <- c(track_rows,
+                      leg_line(ferry_colour, "transit and off effort", 2))
+    }
+    sections <- c(sections, list(list(title = "Track", rows = track_rows)))
+
+    st <- pam_stations()
+    if (!is.null(st) && nrow(st)) {
+      ramp <- leaflet::colorNumeric("viridis", domain = c(0, 1))(seq(0, 1, length.out = 7))
+      sections <- c(sections, list(list(
+        title = "PAM stations",
+        rows = c(leg_ring("size is recording effort"),
+                 leg_ramp(ramp, "0%", "100% of days detected"))
+      )))
+    }
+
+    cs <- bathy_contours()
+    if (!is.null(cs) && length(cs)) {
+      depths <- vapply(cs, function(co) co$depth, numeric(1))
+      cols <- depth_ramp(max(2L, length(depths)))[seq_along(depths)]
+      sections <- c(sections, list(list(
+        title = "Depth",
+        rows = mapply(function(colour, d) leg_line(colour, paste0(d, " m"), 2),
+                      cols, depths, USE.NAMES = FALSE)
+      )))
+    }
+
+    map <- leaflet::leafletProxy("map")
+    leaflet::removeControl(map, "legend")
+    leaflet::addControl(map, html = HTML(build_legend(sections)),
+                        position = "bottomright", layerId = "legend")
   })
 
   observeEvent(input$zoom, {
@@ -1518,6 +1725,17 @@ server <- function(input, output, session) {
               "carry no hover label. Narrow the date range to get them back."),
         fmt_int(drawn$lines), fmt_int(max_labelled_lines)))
     }
+    # A selection whose records are all off effort draws no track at all, and
+    # markers floating over empty water look like a map that failed rather
+    # than like a platform of opportunity, which is what they usually are.
+    if (nrow(in_period()) && isTRUE(input$show_effort) &&
+        !nrow(effort_track()) && !isTRUE(input$show_ferry)) {
+      notes <- c(notes, paste(
+        "No record in this selection is on effort, so there is no on-effort",
+        "track to draw. Tick \"Draw transit and off-effort track\" to see",
+        "where the platform went - or loosen the criteria below it."
+      ))
+    }
     inferred <- sum(in_period()$TYPESOURCE == "speed")
     if (inferred > 0L) {
       notes <- c(notes, sprintf(
@@ -1555,6 +1773,11 @@ server <- function(input, output, session) {
       Year = as.integer(years),
       Days = vapply(years, function(y)
         length(unique(stats::na.omit(dat$DATE[dat$YEAR == y]))), integer(1)),
+      # Beside the kilometres, because "0 km" has two very different causes -
+      # no record passed the criteria, or the records that did are a single
+      # position each - and the count tells them apart at a glance.
+      `On-effort records` = vapply(years, function(y)
+        sum(eff$YEAR == y, na.rm = TRUE), integer(1)),
       `On-effort km` = vapply(years, function(y)
         round(track_km(eff[eff$YEAR == y, , drop = FALSE])), numeric(1)),
       Sightings = vapply(years, function(y)
@@ -1591,6 +1814,18 @@ server <- function(input, output, session) {
       Sightings = vapply(types, function(k)
         sum(as.character(sight$DATATYPE) == k), integer(1)),
       check.names = FALSE, row.names = NULL
+    )
+  }, digits = 0)
+
+  output$by_criterion <- renderTable({
+    dat <- in_period()
+    if (!nrow(dat)) return(NULL)
+    effort_criteria(
+      dat,
+      max_beaufort = input$max_beaufort %||% 3,
+      max_alt_m = input$max_alt %||% 366,
+      min_visibility_nmi = input$min_vis %||% 2,
+      na_action = input$na_action %||% "fail"
     )
   }, digits = 0)
 
