@@ -138,10 +138,22 @@ run_narwc_app <- function(dat = NULL, pam = NULL, ...) {
     rlang::abort("`pam` must be a data frame or a path to a CSV.")
   }
 
+  # An installation with no `shiny/` in it is not a broken app, it is a
+  # narwcr built before the app existed - or one installed underneath a session
+  # that had already loaded a newer one, which is the case that looks like a
+  # bug in the app because `run_narwc_app()` is in memory and its files are
+  # not. Name the directory, because the answer is always to look in it.
   app_dir <- system.file("shiny", package = "narwcr")
   if (!nzchar(app_dir)) {
-    stop("Could not locate the app directory in the installed package.",
-         call. = FALSE)
+    stop(
+      "This narwcr installation has no app in it: there is no `shiny/` ",
+      "directory in\n  ", find.package("narwcr"), "\n",
+      "That usually means narwcr was reinstalled from an older source tree ",
+      "while this session had a newer one loaded. Reinstall, then restart R ",
+      "so the session picks it up:\n",
+      "  pak::pak(\"chross22/narwcr\")\n",
+      call. = FALSE
+    )
   }
 
   old <- options(

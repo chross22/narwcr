@@ -388,3 +388,23 @@ test_that("the layer control offers a PAM overlay only when there are stations",
   expect_true(all(c("Sightings", "On-effort track", "Depth contours") %in%
                     env$overlay_groups(FALSE)))
 })
+
+test_that("an installation with no app in it says so, and says where to look", {
+  # The confusing case: `run_narwc_app()` is in memory from a session that
+  # loaded a complete narwcr, while the copy on disk was replaced by one built
+  # before the app existed. Nothing about "could not locate the app directory"
+  # points at that, so the message names the directory and the fix.
+  err <- tryCatch(
+    with_mocked_bindings(
+      run_narwc_app(),
+      .package = "base",
+      system.file = function(..., package = "base") "",
+      find.package = function(...) "/somewhere/narwcr"
+    ),
+    error = function(e) conditionMessage(e)
+  )
+  skip_if(is.null(err), "mocking base bindings is unsupported here")
+  expect_match(err, "no `shiny/` directory", fixed = TRUE)
+  expect_match(err, "/somewhere/narwcr", fixed = TRUE)
+  expect_match(err, "restart R", fixed = TRUE)
+})
