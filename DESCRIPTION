@@ -27,8 +27,12 @@ Imports:
     tidyr,
     utils
 Suggests:
+    DT,
     googledrive,
+    leaflet,
+    marmap,
     Microsoft365R,
+    shiny,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 URL: https://github.com/chross22/narwcr, https://camilleross.org/narwcr/

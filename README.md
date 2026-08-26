@@ -23,6 +23,7 @@ predictable shape — and nothing that is specific to any one analysis.
 | `angles_from_declination()` | split one declination column and a side into `ANGLEL`/`ANGLER` |
 | `track_speed()`, `classify_platform()` | how fast the platform was moving, and what it therefore was |
 | `narwc_fetch()`, `narwc_cloud_roots()` | fetch extracts from cloud storage |
+| `run_narwc_app()` | look at an extract on an interactive map |
 
 ## A column name is not a contract
 
@@ -94,6 +95,31 @@ legs$kind <- classify_platform(legs)   # aerial, vessel, stationary
 ```
 
 A survey aircraft flies at 90–120 knots and a survey vessel makes about 10.
+
+## Look at it before you model it
+
+```r
+run_narwc_app(dat)                            # or a path, or nothing at all
+run_narwc_app(dat, pam = "detections.csv")    # with the acoustic record beside it
+```
+
+An interactive map of the extract: where the platform went, what it saw, and
+when. Aerial, vessel and opportunistic records are told apart by `LEGTYPE`
+(handbook 8.A.21) and, where `LEGTYPE` says nothing, by how fast the platform
+was moving — and the app reports which records were read and which were
+inferred, because those are not the same claim. Passive acoustic monitoring is
+not in the sightings archive and comes from its own file, drawn as stations
+with recording effort as the denominator.
+
+Depth contours are cut from an ETOPO grid rather than read off a basemap tile,
+so a line on the map is a depth that can be named. They start switched off —
+the first draw fetches a grid — and are cached afterwards under `marmap`'s
+own filename convention, so a grid already downloaded elsewhere in the stack is
+read rather than fetched again.
+
+`flag_effort()`'s criteria are controls rather than constants. Moving the
+Beaufort cutoff and watching the on-effort track shrink is the fastest way to
+see what a threshold costs.
 
 ## Validation is extensible
 

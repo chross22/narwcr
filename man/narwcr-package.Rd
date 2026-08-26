@@ -28,6 +28,7 @@ United States continental shelf. \emph{Fishery Bulletin} 84(2):345-357.
 Useful links:
 \itemize{
   \item \url{https://github.com/chross22/narwcr}
+  \item \url{https://camilleross.org/narwcr/}
   \item Report bugs at \url{https://github.com/chross22/narwcr/issues}
 }
 

@@ -57,3 +57,11 @@ reference:
   - on_effort_census_rows
   - track_speed
   - visibility_ok
+
+- title: Looking at it
+  desc: >
+    An interactive map of an extract: sightings, effort and acoustic
+    stations over a chosen time period, with the effort criteria as
+    controls rather than as constants.
+  contents:
+  - run_narwc_app
