@@ -69,17 +69,19 @@ to be usable in a density estimate.</p>
 
 
 <dt id="arg-max-beaufort">max_beaufort<a class="anchor" aria-label="anchor" href="#arg-max-beaufort"></a></dt>
-<dd><p>Highest acceptable Beaufort sea state. Default <code>3</code>.</p></dd>
+<dd><p>Highest acceptable Beaufort sea state. Default <code>3</code>.
+<code>NULL</code> drops the criterion.</p></dd>
 
 
 <dt id="arg-max-alt-m">max_alt_m<a class="anchor" aria-label="anchor" href="#arg-max-alt-m"></a></dt>
 <dd><p>Highest acceptable aircraft altitude in metres. Default
-<code>366</code>, which is 1,200 feet.</p></dd>
+<code>366</code>, which is 1,200 feet. <code>NULL</code> drops the criterion, which is what a
+shipboard survey needs — see above.</p></dd>
 
 
 <dt id="arg-min-visibility-nmi">min_visibility_nmi<a class="anchor" aria-label="anchor" href="#arg-min-visibility-nmi"></a></dt>
 <dd><p>Minimum acceptable visibility in nautical miles.
-Default <code>2</code>, the CETAP standard.</p></dd>
+Default <code>2</code>, the CETAP standard. <code>NULL</code> drops the criterion.</p></dd>
 
 
 <dt id="arg-legtype-on-effort">legtype_on_effort<a class="anchor" aria-label="anchor" href="#arg-legtype-on-effort"></a></dt>
@@ -110,6 +112,22 @@ contribute effort to a density estimate.</p></li>
 <li><p>Visibility clears <code>min_visibility_nmi</code>, via <code><a href="visibility_ok.html">visibility_ok()</a></code>.</p></li>
 </ul><p>A criterion whose column is absent from the data is skipped, with a message.
 A criterion whose value is <code>NA</code> fails, unless <code>na_action = "pass"</code>.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="a-criterion-that-does-not-apply">A criterion that does not apply<a class="anchor" aria-label="anchor" href="#a-criterion-that-does-not-apply"></a></h2>
+
+
+<p>Passing <code>NULL</code> for a threshold drops that criterion entirely, which is not
+the same as setting it wide. A missing value fails a criterion, so on a file
+holding both an aerial and a shipboard survey the vessel records fail the
+altitude ceiling at any height: they carry no <code>ALT</code>, because there is no
+altitude for them to carry. <code>max_alt_m = NULL</code> is how you say the criterion
+does not apply to this platform, rather than that every vessel record failed
+it. <code>distsamp::prepare_survey(platform = "vessel")</code> passes it for you.</p>
+<p><code>na_action = "pass"</code> would also let those records through, but it lets
+<em>every</em> missing criterion through with them - a record with no sea state and
+no visibility becomes on-effort too. Dropping the one criterion that cannot
+apply keeps the rest strict.</p>
 <p>The defaults are the CETAP standard. Kenney and Winn (1986, p. 347) state the
 criteria applied to that programme's data as "observer(s) formally on watch,
 clear visibility of at least 2 miles, and sea states of Beaufort 3 or lower";
@@ -154,6 +172,17 @@ Guide for Users and Contributors, Version 8</em>. NARWC Reference Document
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># A stricter sea-state cutoff</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/table.html" class="external-link">table</a></span><span class="op">(</span><span class="fu">flag_effort</span><span class="op">(</span><span class="fu"><a href="read_narwc.html">read_narwc</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>, max_beaufort <span class="op">=</span> <span class="fl">2</span><span class="op">)</span><span class="op">$</span><span class="va">OnOff.Effort</span><span class="op">)</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> `read_narwc()` renamed 2 columns:</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   LAT_DD  -&gt; LATITUDE</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   LONG_DD -&gt; LONGITUDE</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> All matched an exact entry in the alias table; `narwc_column_mapping()` returns this, and `quiet = TRUE` silences it.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   0   1 </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>  12 101 </span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># A vessel has no altitude to judge, so the criterion is dropped rather</span></span></span>
+<span class="r-in"><span><span class="co"># than raised - a missing ALT fails any ceiling.</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/table.html" class="external-link">table</a></span><span class="op">(</span><span class="fu">flag_effort</span><span class="op">(</span><span class="fu"><a href="read_narwc.html">read_narwc</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>, max_alt_m <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span><span class="op">$</span><span class="va">OnOff.Effort</span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> `read_narwc()` renamed 2 columns:</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   LAT_DD  -&gt; LATITUDE</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   LONG_DD -&gt; LONGITUDE</span>

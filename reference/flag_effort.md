@@ -26,17 +26,19 @@ flag_effort(
 
 - max_beaufort:
 
-  Highest acceptable Beaufort sea state. Default `3`.
+  Highest acceptable Beaufort sea state. Default `3`. `NULL` drops the
+  criterion.
 
 - max_alt_m:
 
   Highest acceptable aircraft altitude in metres. Default `366`, which
-  is 1,200 feet.
+  is 1,200 feet. `NULL` drops the criterion, which is what a shipboard
+  survey needs — see above.
 
 - min_visibility_nmi:
 
   Minimum acceptable visibility in nautical miles. Default `2`, the
-  CETAP standard.
+  CETAP standard. `NULL` drops the criterion.
 
 - legtype_on_effort:
 
@@ -71,6 +73,22 @@ A record is on effort when all of the following hold:
 A criterion whose column is absent from the data is skipped, with a
 message. A criterion whose value is `NA` fails, unless
 `na_action = "pass"`.
+
+## A criterion that does not apply
+
+Passing `NULL` for a threshold drops that criterion entirely, which is
+not the same as setting it wide. A missing value fails a criterion, so
+on a file holding both an aerial and a shipboard survey the vessel
+records fail the altitude ceiling at any height: they carry no `ALT`,
+because there is no altitude for them to carry. `max_alt_m = NULL` is
+how you say the criterion does not apply to this platform, rather than
+that every vessel record failed it.
+`distsamp::prepare_survey(platform = "vessel")` passes it for you.
+
+`na_action = "pass"` would also let those records through, but it lets
+*every* missing criterion through with them - a record with no sea state
+and no visibility becomes on-effort too. Dropping the one criterion that
+cannot apply keeps the rest strict.
 
 The defaults are the CETAP standard. Kenney and Winn (1986, p. 347)
 state the criteria applied to that programme's data as "observer(s)
@@ -122,6 +140,17 @@ table(dat$OnOff.Effort)
 
 # A stricter sea-state cutoff
 table(flag_effort(read_narwc(path), max_beaufort = 2)$OnOff.Effort)
+#> `read_narwc()` renamed 2 columns:
+#>   LAT_DD  -> LATITUDE
+#>   LONG_DD -> LONGITUDE
+#> All matched an exact entry in the alias table; `narwc_column_mapping()` returns this, and `quiet = TRUE` silences it.
+#> 
+#>   0   1 
+#>  12 101 
+
+# A vessel has no altitude to judge, so the criterion is dropped rather
+# than raised - a missing ALT fails any ceiling.
+table(flag_effort(read_narwc(path), max_alt_m = NULL)$OnOff.Effort)
 #> `read_narwc()` renamed 2 columns:
 #>   LAT_DD  -> LATITUDE
 #>   LONG_DD -> LONGITUDE
