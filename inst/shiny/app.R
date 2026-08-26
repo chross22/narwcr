@@ -54,6 +54,23 @@ library(narwcr)
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
+# A relative path typed into a file box means relative to where the app was
+# launched, which is what someone typing "data/extract.csv" means. It is not
+# where the app is running: `shiny::runApp()` moves into the app's own
+# directory, so an unresolved relative path is looked for inside the installed
+# package. Rewritten only when the file is actually found there, so that a
+# Google Drive id or URL - which is not a path and must not be joined to one -
+# passes through untouched for `narwc_fetch()` to deal with.
+resolve_path <- function(p) {
+  p <- trimws(p)
+  wd <- getOption("narwcr.app_wd")
+  if (!nzchar(p) || is.null(wd) || grepl("^(/|~|[A-Za-z]:[\\\\/])", p)) {
+    return(p)
+  }
+  candidate <- file.path(wd, p)
+  if (file.exists(candidate)) candidate else p
+}
+
 # How many track positions may be drawn before they are thinned, and how many
 # line occupations may be drawn one at a time (which is what buys a hover label
 # naming the line) before they are merged into one fast layer. Both are about
@@ -879,7 +896,7 @@ server <- function(input, output, session) {
   pam_label <- reactiveVal(start_pam_label)
 
   observeEvent(input$load, {
-    path <- trimws(input$path %||% "")
+    path <- resolve_path(input$path %||% "")
     if (!nzchar(path)) return()
     out <- withProgress(message = "Reading extract", value = 0.4, {
       tryCatch(list(ok = TRUE, dat = read_narwc(narwc_fetch(path), quiet = TRUE)),
@@ -897,7 +914,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$load_pam, {
-    path <- trimws(input$pam_path %||% "")
+    path <- resolve_path(input$pam_path %||% "")
     if (!nzchar(path)) return()
     out <- withProgress(message = "Reading acoustic detections", value = 0.4, {
       tryCatch(list(ok = TRUE, dat = read_pam(narwc_fetch(path))),

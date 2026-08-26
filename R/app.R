@@ -125,12 +125,15 @@ run_narwc_app <- function(dat = NULL, pam = NULL, ...) {
 
   if (is.character(pam)) {
     # Read inside the app, by the same reader the app's own file box uses, so
-    # a file that fails reports the failure once and in one voice.
+    # a file that fails reports the failure once and in one voice. Resolved to
+    # an absolute path first: `shiny::runApp()` changes the working directory
+    # to the app's own, so "detections.csv" would be looked for inside the
+    # installed package rather than where it was typed.
     pam_path <- narwc_fetch(pam)
     if (!file.exists(pam_path)) {
       rlang::abort(paste0("No acoustic file at: ", pam))
     }
-    pam <- pam_path
+    pam <- normalizePath(pam_path, mustWork = TRUE)
   } else if (!is.null(pam) && !is.data.frame(pam)) {
     rlang::abort("`pam` must be a data frame or a path to a CSV.")
   }
@@ -144,7 +147,11 @@ run_narwc_app <- function(dat = NULL, pam = NULL, ...) {
   old <- options(
     narwcr.app_data = dat,
     narwcr.app_source = label,
-    narwcr.app_pam = pam
+    narwcr.app_pam = pam,
+    # Where the app was launched from, for the same reason: a relative path
+    # typed into one of the app's file boxes means relative to here, not to
+    # the directory shiny is about to move into.
+    narwcr.app_wd = getwd()
   )
   on.exit(options(old), add = TRUE)
 

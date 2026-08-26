@@ -277,3 +277,29 @@ test_that("a cached grid is read from disk rather than fetched again", {
   b <- env$fetch_bathy(ext, 1, path = dir)
   expect_true(all(unclass(b) == -100))
 })
+
+test_that("a relative path in a file box means relative to where the app was launched", {
+  env <- app_env()
+  dir <- tempfile()
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  file.create(file.path(dir, "extract.csv"))
+
+  op <- options(narwcr.app_wd = dir)
+  on.exit(options(op), add = TRUE)
+
+  # shiny::runApp() has moved the working directory into the installed package
+  # by the time a box is typed into, so an unresolved relative path is looked
+  # for in the wrong place entirely.
+  expect_equal(env$resolve_path("extract.csv"), file.path(dir, "extract.csv"))
+  expect_equal(env$resolve_path(" extract.csv "), file.path(dir, "extract.csv"))
+
+  # An absolute path is already an answer, and a Google Drive id or URL is not
+  # a path at all - joining either to a directory would break it.
+  expect_equal(env$resolve_path("/tmp/elsewhere.csv"), "/tmp/elsewhere.csv")
+  expect_equal(env$resolve_path("https://drive.google.com/file/d/1AbC/view"),
+               "https://drive.google.com/file/d/1AbC/view")
+  expect_equal(env$resolve_path("1AbCdEfGhIjKlMnOpQrStUvWxYz"),
+               "1AbCdEfGhIjKlMnOpQrStUvWxYz")
+  expect_equal(env$resolve_path(""), "")
+})
