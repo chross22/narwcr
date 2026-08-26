@@ -16,13 +16,15 @@ flag_effort(
 \arguments{
 \item{dat}{A data frame of NARWC survey data, ideally from \code{\link[=read_narwc]{read_narwc()}}.}
 
-\item{max_beaufort}{Highest acceptable Beaufort sea state. Default \code{3}.}
+\item{max_beaufort}{Highest acceptable Beaufort sea state. Default \code{3}.
+\code{NULL} drops the criterion.}
 
 \item{max_alt_m}{Highest acceptable aircraft altitude in metres. Default
-\code{366}, which is 1,200 feet.}
+\code{366}, which is 1,200 feet. \code{NULL} drops the criterion, which is what a
+shipboard survey needs — see above.}
 
 \item{min_visibility_nmi}{Minimum acceptable visibility in nautical miles.
-Default \code{2}, the CETAP standard.}
+Default \code{2}, the CETAP standard. \code{NULL} drops the criterion.}
 
 \item{legtype_on_effort}{Integer vector of \code{LEGTYPE} values that count as
 effort. Default \code{2}.}
@@ -54,6 +56,22 @@ contribute effort to a density estimate.
 
 A criterion whose column is absent from the data is skipped, with a message.
 A criterion whose value is \code{NA} fails, unless \code{na_action = "pass"}.
+}
+
+\section{A criterion that does not apply}{
+
+Passing \code{NULL} for a threshold drops that criterion entirely, which is not
+the same as setting it wide. A missing value fails a criterion, so on a file
+holding both an aerial and a shipboard survey the vessel records fail the
+altitude ceiling at any height: they carry no \code{ALT}, because there is no
+altitude for them to carry. \code{max_alt_m = NULL} is how you say the criterion
+does not apply to this platform, rather than that every vessel record failed
+it. \code{distsamp::prepare_survey(platform = "vessel")} passes it for you.
+
+\code{na_action = "pass"} would also let those records through, but it lets
+\emph{every} missing criterion through with them - a record with no sea state and
+no visibility becomes on-effort too. Dropping the one criterion that cannot
+apply keeps the rest strict.
 
 The defaults are the CETAP standard. Kenney and Winn (1986, p. 347) state the
 criteria applied to that programme's data as "observer(s) formally on watch,
@@ -76,6 +94,10 @@ table(dat$OnOff.Effort)
 
 # A stricter sea-state cutoff
 table(flag_effort(read_narwc(path), max_beaufort = 2)$OnOff.Effort)
+
+# A vessel has no altitude to judge, so the criterion is dropped rather
+# than raised - a missing ALT fails any ceiling.
+table(flag_effort(read_narwc(path), max_alt_m = NULL)$OnOff.Effort)
 
 }
 \references{

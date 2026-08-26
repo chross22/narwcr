@@ -83,6 +83,20 @@ visibility_ok <- function(visibility, min_nmi = 2) {
 #' A criterion whose column is absent from the data is skipped, with a message.
 #' A criterion whose value is `NA` fails, unless `na_action = "pass"`.
 #'
+#' @section A criterion that does not apply:
+#' Passing `NULL` for a threshold drops that criterion entirely, which is not
+#' the same as setting it wide. A missing value fails a criterion, so on a file
+#' holding both an aerial and a shipboard survey the vessel records fail the
+#' altitude ceiling at any height: they carry no `ALT`, because there is no
+#' altitude for them to carry. `max_alt_m = NULL` is how you say the criterion
+#' does not apply to this platform, rather than that every vessel record failed
+#' it. `distsamp::prepare_survey(platform = "vessel")` passes it for you.
+#'
+#' `na_action = "pass"` would also let those records through, but it lets
+#' *every* missing criterion through with them - a record with no sea state and
+#' no visibility becomes on-effort too. Dropping the one criterion that cannot
+#' apply keeps the rest strict.
+#'
 #' The defaults are the CETAP standard. Kenney and Winn (1986, p. 347) state the
 #' criteria applied to that programme's data as "observer(s) formally on watch,
 #' clear visibility of at least 2 miles, and sea states of Beaufort 3 or lower";
@@ -98,10 +112,12 @@ visibility_ok <- function(visibility, min_nmi = 2) {
 #'
 #' @param dat A data frame of NARWC survey data, ideally from [read_narwc()].
 #' @param max_beaufort Highest acceptable Beaufort sea state. Default `3`.
+#'   `NULL` drops the criterion.
 #' @param max_alt_m Highest acceptable aircraft altitude in metres. Default
-#'   `366`, which is 1,200 feet.
+#'   `366`, which is 1,200 feet. `NULL` drops the criterion, which is what a
+#'   shipboard survey needs — see above.
 #' @param min_visibility_nmi Minimum acceptable visibility in nautical miles.
-#'   Default `2`, the CETAP standard.
+#'   Default `2`, the CETAP standard. `NULL` drops the criterion.
 #' @param legtype_on_effort Integer vector of `LEGTYPE` values that count as
 #'   effort. Default `2`.
 #' @param na_action What to do when a criterion's value is missing: `"fail"`
@@ -134,6 +150,10 @@ visibility_ok <- function(visibility, min_nmi = 2) {
 #' # A stricter sea-state cutoff
 #' table(flag_effort(read_narwc(path), max_beaufort = 2)$OnOff.Effort)
 #'
+#' # A vessel has no altitude to judge, so the criterion is dropped rather
+#' # than raised - a missing ALT fails any ceiling.
+#' table(flag_effort(read_narwc(path), max_alt_m = NULL)$OnOff.Effort)
+#'
 #' @export
 flag_effort <- function(dat,
                         max_beaufort = 3,
@@ -161,22 +181,36 @@ flag_effort <- function(dat,
 
   ok <- resolve(dat$LEGTYPE %in% legtype_on_effort)
 
-  if ("BEAUFORT" %in% names(dat)) {
-    ok <- ok & resolve(dat$BEAUFORT <= max_beaufort)
-  } else {
-    rlang::inform("No `BEAUFORT` column; sea-state criterion skipped.")
+  # A threshold of NULL is not a threshold of infinity. `resolve()` fails a
+  # record whose criterion is `NA`, so on a file carrying both an aerial and a
+  # shipboard survey the vessel records - which have no altitude, because they
+  # have no altitude to have - fail the altitude ceiling however high it is
+  # set. That is "criterion does not apply" being reported as "criterion not
+  # met", and it puts a whole shipboard survey off effort. NULL says the
+  # criterion does not apply to this platform, and it is skipped the same way
+  # an absent column is.
+  if (!is.null(max_beaufort)) {
+    if ("BEAUFORT" %in% names(dat)) {
+      ok <- ok & resolve(dat$BEAUFORT <= max_beaufort)
+    } else {
+      rlang::inform("No `BEAUFORT` column; sea-state criterion skipped.")
+    }
   }
 
-  if ("ALT" %in% names(dat)) {
-    ok <- ok & resolve(dat$ALT < max_alt_m)
-  } else {
-    rlang::inform("No `ALT` column; altitude criterion skipped.")
+  if (!is.null(max_alt_m)) {
+    if ("ALT" %in% names(dat)) {
+      ok <- ok & resolve(dat$ALT < max_alt_m)
+    } else {
+      rlang::inform("No `ALT` column; altitude criterion skipped.")
+    }
   }
 
-  if ("VISIBLTY" %in% names(dat)) {
-    ok <- ok & resolve(visibility_ok(dat$VISIBLTY, min_nmi = min_visibility_nmi))
-  } else {
-    rlang::inform("No `VISIBLTY` column; visibility criterion skipped.")
+  if (!is.null(min_visibility_nmi)) {
+    if ("VISIBLTY" %in% names(dat)) {
+      ok <- ok & resolve(visibility_ok(dat$VISIBLTY, min_nmi = min_visibility_nmi))
+    } else {
+      rlang::inform("No `VISIBLTY` column; visibility criterion skipped.")
+    }
   }
 
   stopifnot(length(ok) == n)

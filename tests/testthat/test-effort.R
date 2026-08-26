@@ -287,3 +287,32 @@ test_that("an explicit by is still honoured", {
   expect_equal(unique(as.character(classify_platform(d, by = "DATE"))),
                "aerial")
 })
+
+test_that("a NULL threshold drops its criterion rather than widening it", {
+  # The vessel case: no altitude, because there is no altitude to have. A
+  # missing value fails a criterion, so raising the ceiling cannot rescue
+  # these records and only dropping the criterion can.
+  dat <- straight_line(n = 6)
+  dat$ALT <- NA_real_
+  expect_equal(sum(flag_effort(dat)$OnOff.Effort), 0)
+  expect_equal(sum(flag_effort(dat, max_alt_m = Inf)$OnOff.Effort), 0)
+  expect_equal(sum(flag_effort(dat, max_alt_m = NULL)$OnOff.Effort), 6)
+})
+
+test_that("dropping one criterion leaves the others strict", {
+  # `na_action = "pass"` would let these through too, but it would let every
+  # other missing criterion through with them.
+  dat <- straight_line(n = 6)
+  dat$ALT <- NA_real_
+  dat$BEAUFORT[1:2] <- NA
+  expect_equal(sum(flag_effort(dat, max_alt_m = NULL)$OnOff.Effort), 4)
+  expect_equal(sum(flag_effort(dat, na_action = "pass")$OnOff.Effort), 6)
+})
+
+test_that("every criterion can be dropped, and LEGTYPE still decides", {
+  dat <- straight_line(n = 5)
+  dat$LEGTYPE <- c(0, 1, 2, 3, 4)
+  out <- flag_effort(dat, max_beaufort = NULL, max_alt_m = NULL,
+                     min_visibility_nmi = NULL)
+  expect_equal(out$OnOff.Effort, c(0L, 0L, 1L, 0L, 0L))
+})
