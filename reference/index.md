@@ -65,3 +65,12 @@ allowed a sighting.
   : Speed implied by consecutive position fixes
 - [`visibility_ok()`](https://camilleross.org/narwcr/reference/visibility_ok.md)
   : Was visibility acceptable?
+
+## Looking at it
+
+An interactive map of an extract: sightings, effort and acoustic
+stations over a chosen time period, with the effort criteria as controls
+rather than as constants.
+
+- [`run_narwc_app()`](https://camilleross.org/narwcr/reference/run_narwc_app.md)
+  : Look at a NARWC extract on a map

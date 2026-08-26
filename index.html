@@ -137,6 +137,10 @@
 </td>
 <td>fetch extracts from cloud storage</td>
 </tr>
+<tr>
+<td><code><a href="reference/run_narwc_app.html">run_narwc_app()</a></code></td>
+<td>look at an extract on an interactive map</td>
+</tr>
 </tbody>
 </table>
 <div class="section level2">
@@ -179,17 +183,27 @@
 <p>A survey aircraft flies at 90–120 knots and a survey vessel makes about 10.</p>
 </div>
 <div class="section level2">
+<h2 id="look-at-it-before-you-model-it">Look at it before you model it<a class="anchor" aria-label="anchor" href="#look-at-it-before-you-model-it"></a>
+</h2>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="reference/run_narwc_app.html">run_narwc_app</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span>                            <span class="co"># or a path, or nothing at all</span></span>
+<span><span class="fu"><a href="reference/run_narwc_app.html">run_narwc_app</a></span><span class="op">(</span><span class="va">dat</span>, pam <span class="op">=</span> <span class="st">"detections.csv"</span><span class="op">)</span>    <span class="co"># with the acoustic record beside it</span></span></code></pre></div>
+<p>An interactive map of the extract: where the platform went, what it saw, and when. Aerial, vessel and opportunistic records are told apart by <code>LEGTYPE</code> (handbook 8.A.21) and, where <code>LEGTYPE</code> says nothing, by how fast the platform was moving — and the app reports which records were read and which were inferred, because those are not the same claim. Passive acoustic monitoring is not in the sightings archive and comes from its own file, drawn as stations with recording effort as the denominator.</p>
+<p>Depth contours are cut from an ETOPO grid rather than read off a basemap tile, so a line on the map is a depth that can be named. They start switched off — the first draw fetches a grid — and are cached afterwards under <code>marmap</code>’s own filename convention, so a grid already downloaded elsewhere in the stack is read rather than fetched again.</p>
+<p><code><a href="reference/flag_effort.html">flag_effort()</a></code>’s criteria are controls rather than constants. Moving the Beaufort cutoff and watching the on-effort track shrink is the fastest way to see what a threshold costs.</p>
+</div>
+<div class="section level2">
 <h2 id="validation-is-extensible">Validation is extensible<a class="anchor" aria-label="anchor" href="#validation-is-extensible"></a>
 </h2>
 <p><code><a href="reference/validate_narwc.html">validate_narwc()</a></code> runs the handbook-general checks by default. Packages built on top add their own without narwcr needing to know what they are:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/validate_narwc.html">validate_narwc</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span>                                       <span class="co"># handbook rules only</span></span>
 <span><span class="fu"><a href="reference/validate_narwc.html">validate_narwc</a></span><span class="op">(</span><span class="va">dat</span>, checks <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fu"><a href="reference/narwc_checks.html">narwc_checks</a></span><span class="op">(</span><span class="op">)</span>, <span class="fu">my_checks</span><span class="op">(</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"chross22/narwcr"</span><span class="op">)</span></span></code></pre></div>
 </div>

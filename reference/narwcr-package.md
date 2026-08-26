@@ -35,6 +35,8 @@ Useful links:
 
 - <https://github.com/chross22/narwcr>
 
+- <https://camilleross.org/narwcr/>
+
 - Report bugs at <https://github.com/chross22/narwcr/issues>
 
 ## Author
