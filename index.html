@@ -144,73 +144,50 @@
 </tbody>
 </table>
 <div class="section level2">
-<h2 id="a-column-name-is-not-a-contract">A column name is not a contract<a class="anchor" aria-label="anchor" href="#a-column-name-is-not-a-contract"></a>
+<h2 id="column-standardization">Column standardization<a class="anchor" aria-label="anchor" href="#column-standardization"></a>
 </h2>
-<p>Different survey programmes record the same quantity under different names, and occasionally the same name for different quantities. <code><a href="reference/read_narwc.html">read_narwc()</a></code> matches loosely and then tells you exactly what it did:</p>
+<p>Different survey programs sometimes use different names to record the same data, and occasionally the same name for different quantities. <code><a href="reference/read_narwc.html">read_narwc()</a></code> matches loosely and prints in the console exactly how the names were updated. Matches that are guesses are reported as such.</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">dat</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/read_narwc.html">read_narwc</a></span><span class="op">(</span><span class="st">"extract.csv"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/narwc_column_mapping.html">narwc_column_mapping</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span></span></code></pre></div>
-<p>Nothing is renamed silently. If a match is a guess, it is reported as one.</p>
-</div>
-<div class="section level2">
-<h2 id="an-archive-is-not-one-archive">An archive is not one archive<a class="anchor" aria-label="anchor" href="#an-archive-is-not-one-archive"></a>
-</h2>
-<p>A NARWC extract can be several surveys concatenated, each era recording the same variable in a different column. One real archive holds position in <code>TrkLatitude</code> for the years a GPS was fitted and in <code>LATITUDE</code> for the decades before, and does the same for the date, the clock and the event number.</p>
-<p><code><a href="reference/read_narwc.html">read_narwc()</a></code> fills each canonical column from whichever source covers the record in front of it, rather than picking one column for the whole file, and says what it took from where. The difference is not academic: choosing per column instead of per record emptied <code>LATITUDE</code> on 3.75 million records of that archive, and the survivors looked exactly like a clean two-year dataset.</p>
-<p>Where a file records something the handbook does not, it must be named rather than guessed:</p>
+<p>Where a file records data with no corresponding column in the Kenney Handbook, it must be named explicitly in the function callrather than guessed:</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">dat</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/read_narwc.html">read_narwc</a></span><span class="op">(</span><span class="st">"extract.csv"</span>,</span>
 <span>                  extra_columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Decl_Angle"</span>, <span class="st">"Left_or_Right"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">dat</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/angles_from_declination.html">angles_from_declination</a></span><span class="op">(</span><span class="va">dat</span>, <span class="st">"Decl_Angle"</span>, <span class="st">"Left_or_Right"</span><span class="op">)</span></span></code></pre></div>
-</div>
-<div class="section level2">
-<h2 id="what-is-recorded-once-is-not-missing-everywhere">What is recorded once is not missing everywhere<a class="anchor" aria-label="anchor" href="#what-is-recorded-once-is-not-missing-everywhere"></a>
-</h2>
-<p>Survey state is written when it changes. A record taken mid-line often carries no sea state, no altitude and no <code>LEGSTAGE</code> — and a check that treats a blank as a failure will quietly discard most of a survey.</p>
+<p>In the handbook, <code>PLATFORM</code> is optional. Since a data extract can hold both aerial and vessel surveys with no differentiator and the distance machinery downstream is not platform-agnostic, platform needs to be classified.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">legs</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/make_leg_id.html">make_leg_id</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span></span>
-<span><span class="va">legs</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/fill_legstage.html">fill_legstage</a></span><span class="op">(</span><span class="va">legs</span><span class="op">)</span>      <span class="co"># the state, not the value</span></span></code></pre></div>
-<p><code><a href="reference/fill_legstage.html">fill_legstage()</a></code> walks the handbook’s own state machine: after a begin, a continue or a resume the line is continuing. After a break-off the aircraft is circling and after an end-line the line is over, and both keep their <code>NA</code>. On one archive this made 1,928 of 2,280 on-effort census sightings eligible for a distance measurement that they had been excluded from for want of a code nobody wrote down.</p>
-<p><code><a href="reference/fill_narwc.html">fill_narwc()</a></code> is the other direction — for columns whose <em>value</em> carries forward, like sea state. It refuses to fill a sighting column outright, because filling one replicates a detection.</p>
-</div>
-<div class="section level2">
-<h2 id="nothing-declares-the-platform">Nothing declares the platform<a class="anchor" aria-label="anchor" href="#nothing-declares-the-platform"></a>
-</h2>
-<p><code>PLATFORM</code> is optional, has no code book, and is empty on real extracts. An archive can hold an aerial and a shipboard survey with nothing to tell them apart — and the distance machinery downstream is not platform-agnostic.</p>
-<p>Speed cannot be mistaken for anything else:</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">legs</span><span class="op">$</span><span class="va">kind</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/classify_platform.html">classify_platform</a></span><span class="op">(</span><span class="va">legs</span><span class="op">)</span>   <span class="co"># aerial, vessel, stationary</span></span></code></pre></div>
 <p>A survey aircraft flies at 90–120 knots and a survey vessel makes about 10.</p>
 </div>
 <div class="section level2">
-<h2 id="look-at-it-before-you-model-it">Look at it before you model it<a class="anchor" aria-label="anchor" href="#look-at-it-before-you-model-it"></a>
+<h2 id="map-app-to-check-the-data-platform-before-performing-analysis">Map app to check the data platform before performing analysis<a class="anchor" aria-label="anchor" href="#map-app-to-check-the-data-platform-before-performing-analysis"></a>
 </h2>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/run_narwc_app.html">run_narwc_app</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span>                            <span class="co"># or a path, or nothing at all</span></span>
 <span><span class="fu"><a href="reference/run_narwc_app.html">run_narwc_app</a></span><span class="op">(</span><span class="va">dat</span>, pam <span class="op">=</span> <span class="st">"detections.csv"</span><span class="op">)</span>    <span class="co"># with the acoustic record beside it</span></span></code></pre></div>
 <p>An interactive map of the extract: where the platform went, what it saw, and when. Aerial, vessel and opportunistic records are told apart by <code>LEGTYPE</code> (handbook 8.A.21) and, where <code>LEGTYPE</code> says nothing, by how fast the platform was moving — and the app reports which records were read and which were inferred, because those are not the same claim. Passive acoustic monitoring is not in the sightings archive and comes from its own file, drawn as stations with recording effort as the denominator.</p>
-<p>Depth contours are cut from an ETOPO grid rather than read off a basemap tile, so a line on the map is a depth that can be named. They start switched off — the first draw fetches a grid — and are cached afterwards under <code>marmap</code>’s own filename convention, so a grid already downloaded elsewhere in the stack is read rather than fetched again.</p>
 <p><code><a href="reference/flag_effort.html">flag_effort()</a></code>’s criteria are controls rather than constants. Moving the Beaufort cutoff and watching the on-effort track shrink is the fastest way to see what a threshold costs.</p>
 </div>
 <div class="section level2">
-<h2 id="validation-is-extensible">Validation is extensible<a class="anchor" aria-label="anchor" href="#validation-is-extensible"></a>
+<h2 id="validation">Validation<a class="anchor" aria-label="anchor" href="#validation"></a>
 </h2>
 <p><code><a href="reference/validate_narwc.html">validate_narwc()</a></code> runs the handbook-general checks by default. Packages built on top add their own without narwcr needing to know what they are:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="reference/validate_narwc.html">validate_narwc</a></span><span class="op">(</span><span class="va">dat</span><span class="op">)</span>                                       <span class="co"># handbook rules only</span></span>
 <span><span class="fu"><a href="reference/validate_narwc.html">validate_narwc</a></span><span class="op">(</span><span class="va">dat</span>, checks <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fu"><a href="reference/narwc_checks.html">narwc_checks</a></span><span class="op">(</span><span class="op">)</span>, <span class="fu">my_checks</span><span class="op">(</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"chross22/narwcr"</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="licence">Licence<a class="anchor" aria-label="anchor" href="#licence"></a>
 </h2>
-<p>MIT © Camille Ross</p>
+<p>MIT © Camille H. Ross</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
