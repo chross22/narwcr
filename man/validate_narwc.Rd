@@ -57,7 +57,9 @@ rather than a warning, because a line abandoned for weather or re-flown
 later legitimately has none.}
 \item{\code{eventno_not_increasing}}{\code{EVENTNO} does not increase through a
 \code{FILEID}. Repeated values are allowed — the handbook (4.2) assigns one
-event several sightings — but decreases indicate mis-sorted records.}
+event several sightings — but decreases indicate mis-sorted records.
+Each \code{EVENTNO} is compared with the last non-\code{NA} one before it, and
+records with no \code{FILEID} are checked as a group of their own.}
 \item{\code{altitude_looks_like_feet}}{The median \code{ALT} is implausible read as
 metres for a survey aircraft and ordinary read as feet. Handbook 8.A.1
 says \code{ALT} is metres, but also that nearly all submissions arrive in
@@ -80,9 +82,11 @@ non-target species — seals, sharks, sunfish — recorded so they could be
 removed before analysis (handbook 8.A.27). A note, not a warning: the
 file is correct, and duplicates of it are expected. The analysis has to
 exclude them.}
-\item{\code{bad_time_format}}{\code{TIME} is not a 6-digit \code{hhmmss} in 24-hour form
-(handbook 8.A.37). Four-digit \code{hhmm} times are reported separately as a
-warning since they are still found in older data.}
+\item{\code{bad_time_format}}{\code{TIME} is not a 6-digit \code{hhmmss} in 24-hour form,
+including minutes or seconds of 60 or more (handbook 8.A.37). A file
+whose every \code{TIME} is 2359 or less is read as four-digit \code{hhmm}, checked
+in that form, and reported separately as a note, since that form is
+still found in older data. The rule is the one \code{\link[=track_speed]{track_speed()}} uses.}
 \item{\code{coordinates_out_of_range}}{Latitude outside [-90, 90] or longitude
 outside [-180, 180].}
 \item{\code{positive_west_longitude}}{Every longitude is positive. Handbook

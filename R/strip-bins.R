@@ -30,7 +30,8 @@
 #'
 #' @param scheme `"cetap"` or `"nlpsc"`.
 #' @param platform `"skymaster"` or `"at-11"`. Only affects the `"cetap"`
-#'   scheme, where the bins above 1 nmi differ by aircraft.
+#'   scheme, where the bins above 1 nmi differ by aircraft and code `0` is
+#'   listed for the AT-11 only.
 #' @param units `"m"` (default), `"km"`, or `"nmi"`.
 #'
 #' @return A tibble with `code`, `side`, `distbegin`, `distend`.
@@ -61,7 +62,6 @@ narwc_strip_bins <- function(scheme = c("cetap", "nlpsc"),
   # Handbook 8.A.31, in nautical miles.
   if (scheme == "cetap") {
     pairs <- list(
-      c(0, 0, 0),          # on the track-line; AT-11 only
       c(1, 0, 1 / 4),      # the original unsplit closest interval
       c(3, 0, 1 / 8),      # ... subsequently split here
       c(5, 1 / 8, 1 / 4),
@@ -69,8 +69,10 @@ narwc_strip_bins <- function(scheme = c("cetap", "nlpsc"),
       c(9, 1 / 2, 3 / 4),
       c(11, 3 / 4, 1)
     )
+    # On the track-line: the AT-11 only, because the Skymaster cannot see
+    # straight down.
     pairs <- c(pairs, if (platform == "at-11") {
-      list(c(13, 1, Inf))
+      list(c(0, 0, 0), c(13, 1, Inf))
     } else {
       list(c(13, 1, 2), c(15, 2, Inf))
     })

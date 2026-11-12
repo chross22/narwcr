@@ -11,7 +11,11 @@
 #' [flag_effort()] to decide what counts as effort.
 #'
 #' A `DATE` column of class `Date` is derived from `YEAR`, `MONTH`, and `DAY`
-#' when all three are present.
+#' when all three are present; a record whose parts do not make a date (a
+#' missing `YEAR`, `MONTH = 13`) gets `NA`. A supplied `DATE` may be `Date`,
+#' `POSIXct` (read on its own time zone), or character in `"2024-04-01"`,
+#' `"2024/04/01"` or `"20240401"` form; one that cannot be read is rebuilt from
+#' the parts, with a warning.
 #'
 #' @section Column names do not have to match exactly:
 #' Real extracts spell things their own way. Matching ignores case and
@@ -47,7 +51,8 @@
 #' both `TrkLatitude` and a plain `LATITUDE`, they are not two spellings of one
 #' thing: the track log is what the receiver recorded, and the plain column is
 #' the position entered for the platform, which on a file covering both a vessel
-#' and an aircraft is a different place. The track log wins, and the displaced
+#' and an aircraft is a different place. The plain column is recognised however
+#' it is spelled (`Latitude`, `latitude`). The track log wins, and the displaced
 #' column is kept as `LATITUDE_ORIGINAL` rather than dropped, with a warning
 #' naming both. This is the only case where a column already carrying a
 #' canonical name does not win; `prefer_source = FALSE` turns it off.
@@ -77,15 +82,18 @@
 #' and duplicates are not, with one exception — several sightings may share an
 #' event number, and then *all of the non-sighting variables must be identical
 #' across all records*. So an event here is a run of consecutive records
-#' agreeing on every non-sighting variable, a number already recorded anywhere
-#' in that run covers the whole run, and only an event with no number at all is
-#' given one.
+#' agreeing on every non-sighting variable, a record of that run with no number
+#' takes the first number recorded in the run, and an event with no number at
+#' all is given the next free one after its predecessor.
 #'
-#' Where the recorded numbers leave no room for an event being inserted, the
-#' numbers from that point forward are increased. That is the handbook's own
-#' remedy — "it is usually necessary to correct the event numbers from that
-#' point forward in the file" — and it warns, because records elsewhere
-#' referring to the old numbers past that point will no longer match.
+#' Only missing values are supplied. A recorded `EVENTNO` is never changed, and
+#' a FILEID with no missing value is not touched at all, so duplicates and
+#' decreases in the recorded numbers remain for [validate_narwc()] to report.
+#' Where the recorded numbers leave no free whole number for an event being
+#' inserted, it is given a fractional number between its neighbours, with a
+#' warning. The handbook's remedy, "it is usually necessary to correct the
+#' event numbers from that point forward in the file", changes recorded
+#' identifiers and is left to whoever corrects the file.
 #'
 #' Only values are supplied, never the column itself. A file with no `EVENTNO`
 #' column is missing a required variable, and inventing one would hide that.
@@ -97,7 +105,9 @@
 #' multiplier is recorded in the `factor` column of [narwc_column_mapping()].
 #' A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` uses the metres one
 #' and converts nothing — unless the metres column is empty, in which case the
-#' feet one is used and converted. Precedence is written over spellings and
+#' feet one is used and converted. Where the chosen column has gaps that a
+#' losing spelling covers, the gaps are filled from it after converting it by
+#' its own factor, so feet never reach `ALT` unconverted. Precedence is written over spellings and
 #' says nothing about which column a file actually filled in, so a column with
 #' no values in it never outranks one that has them. The same applies to the
 #' GPS track columns: an empty `TrkLatitude` displaces nothing.
@@ -220,8 +230,14 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 
   # 2. Select the columns we recognise, plus anything explicitly requested.
   #    Dropping a column the caller may need is a real loss, so say what went.
+  #    `extra_columns = NULL` keeps everything, and naming a profile as well
+  #    does not narrow that: `c(NULL, profile_cols)` would keep only the
+  #    profile's columns.
   if (!is.null(profile)) {
-    extra_columns <- unique(c(extra_columns, narwc_profiles(profile)$column))
+    profile_cols <- narwc_profiles(profile)$column
+    if (!is.null(extra_columns)) {
+      extra_columns <- unique(c(extra_columns, profile_cols))
+    }
   }
   if (!is.null(extra_columns)) {
     # A column displaced by a GPS track column is kept without being asked for.
@@ -261,11 +277,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     # Blanks became NA at step 3, so a plain NA count is enough — and calling
     # trimws() on every value of every numeric column is not free at scale.
     had <- sum(!is.na(dat[[nm]]))
-    dat[[nm]] <- if (nm %in% c("TIME", "S_TIME")) {
-      parse_narwc_time(dat[[nm]])
-    } else {
-      suppressWarnings(as.numeric(dat[[nm]]))
-    }
+    dat[[nm]] <- coerce_narwc_numeric(dat[[nm]], nm)
     if (had && all(is.na(dat[[nm]]))) {
       rlang::warn(paste0(
         "`", nm, "` had ", had, " value", if (had > 1) "s" else "",
@@ -296,11 +308,7 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 
     orig <- dat[[keep]]
     if (target %in% narwc_numeric_columns && !is.numeric(orig)) {
-      orig <- if (target %in% c("TIME", "S_TIME")) {
-        parse_narwc_time(orig)
-      } else {
-        suppressWarnings(as.numeric(orig))
-      }
+      orig <- coerce_narwc_numeric(orig, target)
     }
 
     gap <- is.na(dat[[target]]) & !is.na(orig)
@@ -333,11 +341,15 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
 
       alt <- dat[[src]]
       if (target %in% narwc_numeric_columns && !is.numeric(alt)) {
-        alt <- if (target %in% c("TIME", "S_TIME")) {
-          parse_narwc_time(alt)
-        } else {
-          suppressWarnings(as.numeric(alt))
-        }
+        alt <- coerce_narwc_numeric(alt, target)
+      }
+      # The winner is already in the canonical unit, so a backup spelled in
+      # another one is converted by its own factor before it fills anything.
+      # `TrkAltitude_ft` filling a `TrkAltitude_m` gap untouched put feet into
+      # a metres column.
+      mult <- unit_factor_for(target, src)
+      if (!is.na(mult)) {
+        if (is.numeric(alt)) alt <- alt * mult else next
       }
       gap <- is.na(dat[[target]]) & !is.na(alt)
       if (any(gap)) {
@@ -346,8 +358,11 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
           rlang::inform(paste0(
             "`", src, "` supplied ", sum(gap), " value",
             if (sum(gap) > 1) "s" else "", " of `", target,
-            "` that the column chosen for it did not record. Two spellings of ",
-            "one variable can each cover a different part of a file."
+            "` that the column chosen for it did not record",
+            if (!is.na(mult)) paste0(", multiplied by ", mult,
+                                     " to reach the unit this package uses"),
+            ". Two spellings of one variable can each cover a different part ",
+            "of a file."
           ))
         }
       }
@@ -363,8 +378,12 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
   #    carries a date but not its parts fails validation for three variables
   #    it demonstrably has.
   parts <- all(c("YEAR", "MONTH", "DAY") %in% names(dat))
+  # Per element, with an explicit format: a missing or impossible part (a NA
+  # YEAR, MONTH 13, 31 April) gives NA for that record. `as.Date()` without a
+  # format guesses from the first element and aborts the whole read when it
+  # cannot, and `sprintf("%04d")` errors on a non-whole number.
   from_parts <- function() {
-    as.Date(sprintf("%04d-%02d-%02d", dat$YEAR, dat$MONTH, dat$DAY))
+    as.Date(paste(dat$YEAR, dat$MONTH, dat$DAY, sep = "-"), format = "%Y-%m-%d")
   }
 
   if (!"DATE" %in% names(dat)) {
@@ -373,7 +392,23 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     # A supplied date column can be in a format `as.Date()` will not take. That
     # is a reason to fall back to the date parts, not to fail the whole read —
     # but it has to be said out loud, because the parts may be on another clock.
-    parsed <- suppressWarnings(as.Date(dat$DATE))
+    parsed <- if (inherits(dat$DATE, "POSIXct")) {
+      # The date on the value's own clock. `as.Date()` converts a POSIXct on
+      # UTC by default, so 22:30 in New York on 1 April became 2 April and
+      # disagreed with the file's own DAY.
+      tz <- attr(dat$DATE, "tzone")[1]
+      if (is.null(tz) || is.na(tz) || !nzchar(tz)) tz <- "UTC"
+      as.Date(dat$DATE, tz = tz)
+    } else if (is.character(dat$DATE)) {
+      # `optional = TRUE` gives NA rather than an error when no format fits,
+      # which is what makes the fallback to the date parts reachable. The
+      # compact "20240401" form is accepted as well.
+      as.Date(dat$DATE, tryFormats = c("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"),
+              optional = TRUE)
+    } else {
+      tryCatch(suppressWarnings(as.Date(dat$DATE)),
+               error = function(e) rep(as.Date(NA), nrow(dat)))
+    }
 
     # `as.Date()` does not reliably fail on a format it cannot read: it tries
     # "%Y/%m/%d" too, so "4/2/2024" is taken as the year 4 rather than
@@ -472,15 +507,6 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
     }
   }
 
-  # 5b. Supply an EVENTNO where the file has none. This is not cosmetic:
-  #     `make_leg_id()` sorts by DATE, FILEID and EVENTNO, and `order()` sends
-  #     NA to the end, so a missing event number silently moves records out of
-  #     survey order before the run-length logic that builds LEGNO3 ever sees
-  #     them. The result is not an error, just the wrong lines.
-  if (make_eventno) {
-    dat <- supply_event_number(dat, quiet)
-  }
-
   # 6. A record with no position cannot contribute effort or place a sighting.
   #    Left in, it silently contributes zero distance, which is worse than
   #    losing it visibly.
@@ -498,6 +524,18 @@ read_narwc <- function(x, extra_columns = character(), profile = NULL,
         ))
       }
     }
+  }
+
+  # 7. Supply an EVENTNO where the file has none. This is not cosmetic:
+  #    `make_leg_id()` sorts by DATE, FILEID and EVENTNO, and `order()` sends
+  #    NA to the end, so a missing event number silently moves records out of
+  #    survey order before the run-length logic that builds LEGNO3 ever sees
+  #    them. The result is not an error, just the wrong lines.
+  #
+  #    After the records with no position are dropped, so that the count it
+  #    reports is of values the caller actually receives.
+  if (make_eventno) {
+    dat <- supply_event_number(dat, quiet)
   }
 
   class(dat) <- unique(c("narwc_data", class(dat)))
@@ -526,9 +564,16 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   # The one documented exception to "the real one always wins": a GPS track
   # column displaces a canonical column of the same name. The displaced column
   # is renamed rather than dropped, so nothing is lost and both are readable.
+  # The plain column is found the way any other column is, ignoring case and
+  # separators: `Latitude` is as much the plain column as `LATITUDE`, and
+  # requiring the exact spelling let `Latitude` beat `TrkLatitude` outright.
   displaced <- character(0)
+  displaced_from <- character(0)
   for (target in if (prefer_source) names(narwc_preferred_source) else character(0)) {
-    if (!target %in% taken) next
+    plain <- which(nms == target)
+    if (!length(plain)) plain <- which(input_norm == norm(target))
+    if (!length(plain)) next
+    plain <- plain[1]
     src <- which(input_norm %in% norm(narwc_preferred_source[[target]]))
     if (!length(src)) next
     # And an empty preferred source displaces nothing — taking `TrkLatitude`
@@ -540,6 +585,7 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
     keep <- paste0(target, "_ORIGINAL")
     if (keep %in% nms) next
     displaced[target] <- keep
+    displaced_from[target] <- nms[plain]
     taken <- setdiff(taken, target)
   }
 
@@ -571,6 +617,8 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
 
   found <- vapply(seq_along(nms), target_of, character(2))
   wants <- found[1, ]
+  # A displaced column is moved aside below, not entered for its own name.
+  wants[match(displaced_from, nms)] <- NA_character_
   guessed <- found[2, ] == "TRUE"
   inferred <- logical(0)
   conversions <- numeric(0)
@@ -604,8 +652,17 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
       # A column whose name *is* the canonical one bar case or punctuation
       # outranks one that only got there through an alias: `Latitude` beats
       # `Lat` for LATITUDE. Documented priority breaks any remaining tie.
+      # Where the plain column has been displaced, the preferred source comes
+      # first of all, or a second plain spelling (`Latitude` beside
+      # `LATITUDE`) would win back what the track log just took.
+      not_preferred <- if (target %in% names(displaced)) {
+        !norm(nms[claimants]) %in% norm(narwc_preferred_source[[target]])
+      } else {
+        rep(FALSE, length(claimants))
+      }
       is_canonical <- norm(nms[claimants]) != norm(target)
       claimants <- claimants[order(
+        not_preferred,
         is_canonical,
         vapply(claimants, function(i) priority(nms[i], target), numeric(1))
       )]
@@ -628,7 +685,8 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
     if (!is.null(displaced[target]) && !is.na(displaced[target])) {
       rlang::warn(paste0(
         "`", nms[pick], "` is being used as `", target, "`, and the file's own ",
-        "`", target, "` column is kept as `", displaced[[target]], "`. Where a ",
+        "`", displaced_from[[target]], "` column is kept as `",
+        displaced[[target]], "`. Where a ",
         "file carries both, `", nms[pick], "` is the one to believe. Pass ",
         "`prefer_source = FALSE` to keep `", target, "` as it is."
       ))
@@ -657,7 +715,7 @@ resolve_columns <- function(nms, schema, prefer_source = TRUE, values = NULL) {
   # Appended last so that `inferred` stays aligned with `renames`. A displaced
   # column is moved aside by an explicit rule, never by an inference.
   for (target in names(displaced)) {
-    renames[target] <- displaced[[target]]
+    renames[displaced_from[[target]]] <- displaced[[target]]
     inferred <- c(inferred, FALSE)
   }
 
@@ -715,7 +773,8 @@ report_renamed_columns <- function(renames, inferred) {
 #'   `"inferred"` for one found after normalising case and separators. `factor`
 #'   is the multiplier applied to reach the canonical unit — `0.3048` for an
 #'   altitude that arrived in feet — and `NA` where the values were taken as
-#'   they were. Zero rows when nothing was renamed.
+#'   they were. Zero rows, with the same four columns, when nothing was
+#'   renamed or `dat` carries no mapping.
 #'
 #' @seealso [read_narwc()], [standardize_narwc_columns()]
 #'
@@ -728,22 +787,22 @@ report_renamed_columns <- function(renames, inferred) {
 narwc_column_mapping <- function(dat) {
   m <- attr(dat, "column_mapping")
   if (is.null(m)) {
-    return(tibble::tibble(
-      original = character(0), standardized = character(0),
-      match = character(0)
-    ))
+    return(column_mapping_table(character(0), logical(0)))
   }
   m
 }
 
-# Build the record that travels with the data.
+# Build the record that travels with the data. Always the same four columns of
+# the same types, renames or none: `names()` of an empty vector is NULL, and a
+# NULL column is silently left out of a tibble.
 column_mapping_table <- function(renames, inferred, conversions = numeric(0)) {
-  standardized <- unname(renames)
+  standardized <- as.character(unname(renames))
   tibble::tibble(
-    original = names(renames),
+    original = names(renames) %||% character(0),
     standardized = standardized,
-    match = ifelse(inferred, "inferred", "alias"),
-    factor = unname(conversions[match(standardized, names(conversions))])
+    match = as.character(ifelse(inferred, "inferred", "alias")),
+    factor = as.numeric(unname(conversions[match(standardized,
+                                                 names(conversions))]))
   )
 }
 
@@ -753,8 +812,11 @@ column_mapping_table <- function(renames, inferred, conversions = numeric(0)) {
 # of those into NA without a word, which is how a file can arrive with a
 # perfectly good clock and come out with no times at all.
 #
-# The last clock-looking piece of the string is taken, so a bare time and a
-# full timestamp both work. Seconds are optional and default to zero.
+# The first clock-looking piece of the string is taken, so a bare time and a
+# full timestamp both work, and the "05:00" of a trailing UTC offset in
+# "2024-04-01T12:34:56-05:00" is not mistaken for the time. Seconds are
+# optional and default to zero. A trailing AM or PM is honoured, and an hour,
+# minute or second out of range gives NA rather than a number.
 parse_narwc_time <- function(x) {
   if (is.numeric(x)) {
     return(x)
@@ -781,17 +843,37 @@ parse_narwc_time <- function(x) {
       floor(grab(p, "S"))
   }
 
-  clock <- is.na(out) & !is.na(s) & grepl("[0-9]{1,2}:[0-9]{2}", s)
+  # A clock is one or two digits of hour, not part of a longer number, so
+  # "123:45" is not read as 23:45. Seconds may carry a fraction, which is
+  # dropped, as the period branch above does.
+  pattern <- "(?<![0-9])[0-9]{1,2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]+)?)?(?![0-9:])"
+  clock <- is.na(out) & !is.na(s)
+  at <- rep(-1L, length(s))
+  if (any(clock)) at[clock] <- regexpr(pattern, s[clock], perl = TRUE)
+  clock <- clock & at > 0
   if (any(clock)) {
-    hit <- regmatches(
-      s[clock],
-      regexpr("[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?", s[clock])
-    )
-    parts <- strsplit(hit, ":", fixed = TRUE)
-    out[clock] <- vapply(parts, function(p) {
+    hit <- regmatches(s[clock], regexpr(pattern, s[clock], perl = TRUE))
+    rest <- substring(s[clock], at[clock] + nchar(hit))
+    p <- do.call(rbind, lapply(strsplit(hit, ":", fixed = TRUE), function(p) {
       p <- suppressWarnings(as.numeric(p))
-      p[1] * 10000 + p[2] * 100 + if (length(p) > 2 && !is.na(p[3])) p[3] else 0
-    }, numeric(1))
+      c(p[1], p[2], if (length(p) > 2) floor(p[3]) else 0)
+    }))
+    h <- p[, 1]
+
+    # A 12-hour clock: "1:30:00 PM" is 13:30, "12:15 AM" is 00:15. An hour of
+    # 0 or above 12 has no meaning with a suffix, so it is not guessed at.
+    pm <- grepl("^\\s*[Pp]\\.?[Mm]\\.?(?![A-Za-z])", rest, perl = TRUE)
+    am <- grepl("^\\s*[Aa]\\.?[Mm]\\.?(?![A-Za-z])", rest, perl = TRUE)
+    twelve <- am | pm
+    h[which(twelve & (h < 1 | h > 12))] <- NA
+    h[which(am & h == 12)] <- 0
+    later <- which(pm & h < 12)
+    h[later] <- h[later] + 12
+
+    # Out of range is not a time. "25:70" read digit by digit is 257000, which
+    # looks like a time to everything downstream.
+    ok <- !is.na(h) & h <= 23 & p[, 2] <= 59 & p[, 3] <= 59
+    out[clock] <- ifelse(ok, h * 10000 + p[, 2] * 100 + p[, 3], NA_real_)
   }
   out
 }
@@ -810,9 +892,9 @@ parse_narwc_time <- function(x) {
 # that carries a number anywhere among its records lends it to the rest, and
 # only an event with no number at all needs one invented. Those are given
 # whole numbers that fit between their neighbours. Where no whole number fits,
-# nothing conformant can be inserted, and the FILEID is renumbered from 1 with
-# a warning — that is a real change to existing identifiers and is not done
-# quietly.
+# they are given fractional ones between them, with a warning. A number the
+# file recorded is never changed, and a file with no missing number is not
+# touched at all.
 supply_event_number <- function(dat, quiet = FALSE) {
   if (!nrow(dat)) {
     if (!"EVENTNO" %in% names(dat)) dat$EVENTNO <- numeric(0)
@@ -828,8 +910,13 @@ supply_event_number <- function(dat, quiet = FALSE) {
   }
 
   n_before <- sum(is.na(dat$EVENTNO))
-  file_key <- if ("FILEID" %in% names(dat)) as.character(dat$FILEID) else
+  # Grouped by position in `unique()`, not by `==`: `match()` matches NA to NA,
+  # whereas `file_key == NA` selects nothing and left a file with no FILEID
+  # unnumberable.
+  fileid <- if ("FILEID" %in% names(dat)) as.character(dat$FILEID) else
     rep("", nrow(dat))
+  files <- unique(fileid)
+  file_key <- match(fileid, files)
 
   # Handbook 8.A.10: records may share an event number only when they are
   # multiple sightings at one event, and then "all of the non-sighting
@@ -847,9 +934,12 @@ supply_event_number <- function(dat, quiet = FALSE) {
     c(narwc_sighting_columns(), "EVENTNO", "FILEID",
       grep("_ORIGINAL$", names(dat), value = TRUE), "ALT_ASSUMED")
   )
-  shifted <- character(0)
+  crowded <- character(0)
 
-  for (f in unique(file_key)) {
+  # Only files that are missing a number are touched. A complete file is left
+  # exactly as recorded, duplicates and decreases included, because those are
+  # what `validate_narwc()` is there to report.
+  for (f in unique(file_key[is.na(dat$EVENTNO)])) {
     i <- which(file_key == f)
     ev <- if (length(event_cols)) {
       rle_id(do.call(paste, c(
@@ -859,20 +949,26 @@ supply_event_number <- function(dat, quiet = FALSE) {
       seq_along(i)
     }
 
-    # `rle_id()` numbers the events 1..k in order, so the first number
-    # recorded for each can be gathered in one pass. Scanning the file once
-    # per event instead is quadratic, and this runs on millions of records.
+    # `rle_id()` numbers the events 1..k in order, so the first and last
+    # numbers recorded for each can be gathered in one pass. Scanning the file
+    # once per event instead is quadratic, and this runs on millions of records.
     have <- dat$EVENTNO[i]
-    known <- rep(NA_real_, max(ev))
+    first_known <- last_known <- rep(NA_real_, max(ev))
     seen <- which(!is.na(have))
     if (length(seen)) {
       first <- seen[!duplicated(ev[seen])]
-      known[ev[first]] <- have[first]
+      first_known[ev[first]] <- have[first]
+      last <- seen[!duplicated(ev[seen], fromLast = TRUE)]
+      last_known[ev[last]] <- have[last]
     }
 
-    out <- assign_event_numbers(known)
-    if (out$moved > 0L) shifted <- c(shifted, f)
-    dat$EVENTNO[i] <- out$v[ev]
+    out <- assign_event_numbers(first_known, last_known)
+    if (out$crowded > 0L) crowded <- c(crowded, files[f])
+
+    # Values are supplied, never replaced: a record that carries a number
+    # keeps it, even where its event's other records carry a different one.
+    gap <- is.na(have)
+    dat$EVENTNO[i[gap]] <- out$v[ev[gap]]
   }
 
   if (!quiet) {
@@ -884,38 +980,75 @@ supply_event_number <- function(dat, quiet = FALSE) {
       "as `NA`."
     ))
   }
-  if (length(shifted)) {
+  if (length(crowded)) {
     rlang::warn(paste0(
-      "Inserting the missing event numbers in FILEID ",
-      paste0("`", unique(shifted), "`", collapse = ", "),
-      " left no free number, so the numbers from that point forward were ",
-      "increased to keep EVENTNO increasing - the correction handbook 8.A.10 ",
-      "prescribes for an inserted event. Any record elsewhere referring to ",
-      "the old numbers past that point will no longer match."
+      "The recorded event numbers in FILEID ",
+      paste0("`", ifelse(is.na(crowded), "NA", crowded), "`", collapse = ", "),
+      " leave no free whole number for some missing ones, so those were ",
+      "given fractional numbers between their neighbours. Recorded numbers ",
+      "are never changed here; handbook 8.A.10's remedy, renumbering from ",
+      "that point forward, is a correction to the file itself."
     ))
   }
   dat
 }
 
 # Handbook 8.A.10: EVENTNO "must increase sequentially within a file", skipped
-# numbers are allowed and duplicates are not. So walk the events in order,
-# keep every number that is already larger than the last one used, and give
-# an event without a number the next one free. Where a recorded number is no
-# longer free - the file left no room for the event being inserted - it moves
-# up, which is the handbook's own remedy: "it is usually necessary to correct
-# the event numbers from that point forward in the file".
-assign_event_numbers <- function(known) {
-  j <- seq_along(known)
+# numbers are allowed and duplicates are not. An event with a recorded number
+# keeps it. A run of events with none is numbered upward from the last number
+# recorded before it - the next ones free - provided they fit below the next
+# number recorded after it. Where they do not fit, no whole number can be
+# inserted without changing a recorded one, so the run is spread evenly
+# between its neighbours instead: still in survey order for `make_leg_id()`,
+# and visibly not a number anyone recorded.
+#
+# `first_known` and `last_known` are the first and last numbers recorded in
+# each event, NA where it recorded none. Returns the number for each event and
+# how many events had to be given a fractional one.
+assign_event_numbers <- function(first_known, last_known = first_known) {
+  v <- first_known
+  miss <- is.na(first_known)
+  if (!any(miss)) return(list(v = v, crowded = 0L))
 
-  # The walk written in closed form, because it runs once per event and there
-  # can be millions. Each event takes its recorded number, or the next one
-  # free after the event before it — so an event ends up at least `j`, and at
-  # least one more than any earlier number already claimed:
-  #     v[j] = j + max(0, max over i <= j of (known[i] - i))
-  a <- ifelse(is.na(known), -Inf, known)
-  v <- j + pmax(0, cummax(a - j))
+  # Runs of consecutive events with no number, worked one run at a time so
+  # this stays linear in the number of events.
+  idx <- which(miss)
+  crowded <- 0L
+  for (k in split(idx, rle_id(miss)[idx])) {
+    m <- length(k)
+    lo <- if (k[1] > 1L) last_known[k[1] - 1L] else 0
+    hi <- if (k[m] < length(v)) first_known[k[m] + 1L] else Inf
+    if (hi - lo - 1 >= m) {
+      v[k] <- lo + seq_len(m)
+    } else {
+      step <- if (hi > lo) (hi - lo) / (m + 1) else 1 / (m + 1)
+      v[k] <- lo + step * seq_len(m)
+      crowded <- crowded + m
+    }
+  }
+  list(v = v, crowded = crowded)
+}
 
-  list(v = v, moved = sum(!is.na(known) & v != known))
+# Read one column as the number a numeric NARWC variable holds. A factor is
+# read through its labels: `as.numeric()` on a factor returns the level codes,
+# so `factor(c("42.1", "41.5"))` would arrive as latitudes 2 and 1.
+coerce_narwc_numeric <- function(x, target) {
+  if (is.factor(x)) x <- as.character(x)
+  if (target %in% c("TIME", "S_TIME")) {
+    parse_narwc_time(x)
+  } else {
+    suppressWarnings(as.numeric(x))
+  }
+}
+
+# The multiplier that takes column `src` onto `target`'s canonical unit, or NA
+# where its name declares no other unit. Matched the way column names are, so
+# `TrkAltitude_ft` and `TRKALTITUDE_FT` are the same column.
+unit_factor_for <- function(target, src) {
+  factor_for <- narwc_unit_factors()[[target]]
+  if (is.null(factor_for)) return(NA_real_)
+  norm <- function(x) toupper(gsub("[^A-Za-z0-9]", "", x))
+  unname(factor_for[match(norm(src), norm(names(factor_for)))])
 }
 
 # Rescale the columns whose input spelling named a unit that is not the

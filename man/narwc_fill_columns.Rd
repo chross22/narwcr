@@ -43,6 +43,14 @@ downstream would be wrong by orders of magnitude. \code{EVENTNO}, \code{TIME},
 makes a record distinct from the one before it.
 }
 
+\section{\code{LEGSTAGE} is not in the default set}{
+
+\code{LEGSTAGE} records an event (begin, break off, resume, end), not a state, so
+carrying its value forward is wrong: a begin-line \code{1} copied down the line
+marks every record "begin line". \code{\link[=fill_legstage]{fill_legstage()}} reconstructs the state
+instead, and \code{\link[=fill_narwc]{fill_narwc()}} hands \code{LEGSTAGE} to it when asked to fill it.
+}
+
 \examples{
 narwc_fill_columns()
 narwc_never_fill()

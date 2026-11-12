@@ -427,13 +427,14 @@ test_that("a gap is filled with a whole number that fits between neighbours", {
   expect_true(all(out$EVENTNO == round(out$EVENTNO)))
 })
 
-test_that("no room means later numbers move up, not a renumber from 1", {
-  # Handbook 8.A.10: "correct the event numbers from that point forward".
+test_that("no room gives a fractional number; recorded ones never move", {
+  # Renumbering forward (handbook 8.A.10) changes recorded identifiers, which
+  # is a correction to the file, not something a reader does on its own.
   dat <- ev_base(3)
   dat$EVENTNO <- c("10", NA, "11")          # nothing fits between 10 and 11
 
-  expect_warning(out <- read_narwc(dat, quiet = TRUE), "from that point forward")
-  expect_equal(out$EVENTNO, c(10, 11, 12))
+  expect_warning(out <- read_narwc(dat, quiet = TRUE), "fractional")
+  expect_equal(out$EVENTNO, c(10, 10.5, 11))
 })
 
 test_that("skipped numbers are allowed and are left as they are", {

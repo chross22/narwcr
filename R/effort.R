@@ -246,7 +246,13 @@ flag_effort <- function(dat,
 #'   \item{A begin-line record}{`LEGSTAGE == 1` always opens an occupation.
 #'     Without this a line flown twice under one number is silently a single
 #'     occupation, since nothing about `LEGNO` changes between the two.}
-#'   \item{A change of `LEGNO`}{Opens an occupation, as it always has.}
+#'   \item{A change of `LEGNO`}{Opens an occupation, as it always has. A
+#'     record with no `LEGNO` belongs to the occupation it falls in rather than
+#'     starting one, so a `LEGNO` is compared with the last one recorded
+#'     earlier that day, and a line that drops its number for a record and
+#'     picks it up again stays one occupation. The day's first `LEGNO` opens
+#'     an occupation unless a begin-line record since the previous `LEGNO`
+#'     already opened it; it then names that occupation.}
 #'   \item{A run of census track}{Only where the day records neither of the
 #'     above. This is inference rather than a reading of what was recorded, so
 #'     those occupations are named `derived_<n>` and reported.}
@@ -333,7 +339,6 @@ make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
   has_begin <- day %in% unique(day[begin])
   has_legno <- day %in% unique(day[!is.na(dat$LEGNO2)])
 
-  changed <- function(x) c(TRUE, x[-1] != x[-n] | xor(is.na(x[-1]), is.na(x[-n])))
   new_day <- c(TRUE, day[-1] != day[-n])
 
   start <- new_day |
@@ -341,7 +346,7 @@ make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
     # flown twice under one number is silently a single occupation, because
     # nothing about LEGNO changes between them.
     (has_begin & begin) |
-    (has_legno & changed(dat$LEGNO2) & !is.na(dat$LEGNO2)) |
+    (has_legno & legno_starts(dat$LEGNO2, day, begin)) |
     # Neither recorded: a run of census records is the only remaining
     # evidence of where a line starts and stops.
     (!has_begin & !has_legno & census & c(TRUE, !census[-n]))
@@ -433,6 +438,42 @@ make_leg_id <- function(dat, sort = TRUE, quiet = FALSE) {
   dat
 }
 
+# Records where a LEGNO opens a new occupation. A record with no LEGNO carries
+# the current occupation and never opens one, so each LEGNO is compared with
+# the last LEGNO recorded before it on the same day, not with the record
+# immediately above. A LEGNO with no earlier LEGNO that day opens an
+# occupation - the transit before a day's first line stays outside it - unless
+# a begin-line record since the previous LEGNO (or the start of the day)
+# already opened it, in which case the LEGNO names that occupation. Shared by
+# `make_leg_id()` and `legstage_sequence_check()`, which must agree.
+legno_starts <- function(legno, day, begin) {
+  n <- length(legno)
+  if (!n) {
+    return(logical(0))
+  }
+  i <- seq_len(n)
+  day <- ifelse(is.na(day), "\rNA", as.character(day))
+
+  known <- which(!is.na(legno))
+  k <- findInterval(i - 1L, known)
+  prev_pos <- rep(NA_integer_, n)
+  prev_pos[k > 0] <- known[k[k > 0]]
+  prev_pos[!is.na(prev_pos) & day[prev_pos] != day] <- NA_integer_
+
+  day_start <- c(TRUE, day[-1] != day[-n])
+  first_of_day <- i[day_start][cumsum(day_start)]
+  floor <- ifelse(is.na(prev_pos), first_of_day - 1L, prev_pos)
+
+  b <- which(begin)
+  kb <- findInterval(i - 1L, b)
+  last_begin <- rep(0L, n)
+  last_begin[kb > 0] <- b[kb[kb > 0]]
+  opened <- last_begin > floor
+
+  prev_val <- legno[prev_pos]
+  !is.na(legno) & !opened & (is.na(prev_val) | legno != prev_val)
+}
+
 #' Which records are eligible for a right-angle distance?
 #'
 #' Reports the records that are on effort, on a census line, and continuing it.
@@ -506,6 +547,21 @@ on_effort_census_rows <- function(dat) {
 #'   `300`. A long gap is a break in the record rather than slow travel, and
 #'   including it drags the speed down.
 #'
+#' @section Reading TIME:
+#' `TIME` is hhmmss (handbook 8.A.37), but some files record four-digit hhmm.
+#' A value of 2359 or less is ambiguous, because it is also an hhmmss time
+#' before 00:24, so the form is decided per file rather than per record: where
+#' every non-`NA` `TIME` in a `FILEID` (or in the whole frame, without one) is
+#' a whole number from 0 to 2359, that file is read as hhmm. An hhmmss file is
+#' misread only if it was recorded entirely between midnight and 00:24.
+#' [validate_narwc()] applies the same rule.
+#'
+#' Where `DATE` is present the interval is taken from date and time together,
+#' so a pair of fixes either side of midnight has its true positive gap. The
+#' default grouping already separates days, so this matters only for a `by`
+#' that does not include `DATE`. Without `DATE` such an interval is negative
+#' and is `NA`.
+#'
 #' @return A numeric vector of knots, one per row: the speed from that record
 #'   to the next. `NA` at the end of each stretch and wherever the interval is
 #'   unusable.
@@ -527,9 +583,11 @@ track_speed <- function(dat, by = NULL, max_gap = 300) {
 
   key <- speed_key(dat, by)
 
-  tt <- sprintf("%06d", ifelse(is.na(dat$TIME), 0L, as.integer(round(dat$TIME))))
-  tsec <- as.numeric(substr(tt, 1, 2)) * 3600 +
-    as.numeric(substr(tt, 3, 4)) * 60 + as.numeric(substr(tt, 5, 6))
+  tsec <- narwc_time_seconds(dat)
+  if ("DATE" %in% names(dat)) {
+    day <- tryCatch(as.numeric(as.Date(dat$DATE)), error = function(e) NULL)
+    if (!is.null(day)) tsec <- day * 86400 + tsec
+  }
 
   gap <- c(diff(tsec), NA_real_)
   step <- c(haversine_km(
@@ -594,8 +652,10 @@ classify_platform <- function(dat, by = NULL, aerial_min = 40,
 
   # One label per stretch, from its median. A single interval can be anything -
   # a repeated fix, a dropped second - and a platform does not change mid-line.
+  # By position, not by name: with no grouping column every key is "", and
+  # indexing by the empty string matches no name.
   med <- tapply(kn, key, function(v) stats::median(v, na.rm = TRUE))
-  per_row <- unname(med[key])
+  per_row <- unname(med[match(key, names(med))])
 
   factor(
     ifelse(is.na(per_row), NA_character_,
@@ -630,4 +690,40 @@ speed_key <- function(dat, by = NULL) {
     return(fallback)
   }
   ifelse(is.na(dat$LEGNO3), fallback, paste0("leg\r", as.character(dat$LEGNO3)))
+}
+
+
+# Whether each record's TIME is four-digit hhmm rather than hhmmss. Decided per
+# file (`FILEID`, or the whole frame without one): a file is hhmm when every
+# non-NA TIME in it is a whole number from 0 to 2359. Per record would be
+# wrong, because 2359 is also 00:23:59; per file, an hhmmss file is misread
+# only if it was recorded entirely before 00:24. Shared by `track_speed()` and
+# `check_time_format()` (see `?track_speed`, "Reading TIME").
+narwc_time_is_hhmm <- function(dat) {
+  tm <- suppressWarnings(as.numeric(dat$TIME))
+  n <- length(tm)
+  if (!n) {
+    return(logical(0))
+  }
+  grp <- if ("FILEID" %in% names(dat)) {
+    ifelse(is.na(dat$FILEID), "\rNA", as.character(dat$FILEID))
+  } else {
+    rep("", n)
+  }
+  short <- is.na(tm) | (tm >= 0 & tm <= 2359 & tm %% 1 == 0)
+  all_short <- tapply(short, grp, all)
+  any_time <- tapply(!is.na(tm), grp, any)
+  idx <- match(grp, names(all_short))
+  as.vector(all_short[idx] & any_time[idx])
+}
+
+# TIME as seconds past midnight, reading hhmm files as hhmm. NA where TIME is
+# missing. Out-of-range digits are not rejected here; `check_time_format()`
+# reports them.
+narwc_time_seconds <- function(dat) {
+  tm <- suppressWarnings(as.numeric(dat$TIME))
+  tm <- round(tm)
+  hhmm <- narwc_time_is_hhmm(dat)
+  tm[hhmm] <- tm[hhmm] * 100
+  (tm %/% 10000) * 3600 + ((tm %/% 100) %% 100) * 60 + tm %% 100
 }

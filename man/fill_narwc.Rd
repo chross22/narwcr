@@ -16,7 +16,8 @@ fill_narwc(
 \item{dat}{A data frame of NARWC survey data, in survey order.}
 
 \item{columns}{Columns to fill. Defaults to \code{\link[=narwc_fill_columns]{narwc_fill_columns()}}. Anything
-in \code{\link[=narwc_never_fill]{narwc_never_fill()}} is an error rather than a silent omission.}
+in \code{\link[=narwc_never_fill]{narwc_never_fill()}} is an error rather than a silent omission.
+\code{LEGSTAGE} is accepted and handed to \code{\link[=fill_legstage]{fill_legstage()}}.}
 
 \item{by}{Grouping columns. \code{NULL} (default) uses \code{FILEID} and \code{DATE} where
 present.}
@@ -27,7 +28,8 @@ present.}
 \item{quiet}{Suppress the report of what was filled. Default \code{FALSE}.}
 }
 \value{
-\code{dat} with the requested columns filled.
+\code{dat} with the requested columns filled, plus \code{LEGSTAGE_FILLED} when
+\code{LEGSTAGE} was requested.
 }
 \description{
 NARWC data often records a value once and leaves it blank until it changes —
@@ -63,19 +65,25 @@ whatever was recorded first. Where a day's records begin on transit before the
 first \code{LEGTYPE} is entered, back-filling a \code{2} would mark that transit as
 census effort.
 
+For that reason the leg columns \code{LEGTYPE} and \code{LEGNO} are never filled
+backwards, whatever \code{direction} says. Records before the first leg code of
+a group are transit out to the survey area by convention, and
+\code{\link[=make_leg_id]{make_leg_id()}} leaves them outside any line. The backward pass applies to
+the sighting-condition, platform and design columns only.
+
 Because those are the inferred values rather than the recovered ones, the
 report counts them separately. A large backward count is worth looking at.
 }
 
-\section{A caution on \code{LEGSTAGE}}{
+\section{\code{LEGSTAGE} goes through \code{\link[=fill_legstage]{fill_legstage()}}}{
 
-Filling \code{LEGSTAGE} down is the least safe of the defaults. If a file records
-\code{1} (begin line) and leaves the continuation rows blank, filling down marks
-every record of that line as "begin line" rather than \code{2} (continue) — and
-since on-effort eligibility is \code{LEGSTAGE == 2}, the whole line would drop out
-of every distance calculation. Whether that happens depends on the recording
-convention of the file in hand. Check the \code{LEGSTAGE} counts in the report
-against what you expect before trusting a filled column.
+\code{LEGSTAGE} is not in the default set. Carrying its value forward marks every
+record of a line "begin line" when only the first record carries a \code{1}, and
+since on-effort eligibility is \code{LEGSTAGE == 2} the whole line would drop out
+of every distance calculation. When \code{LEGSTAGE} is named in \code{columns} it is
+not filled as a value: after the other columns are filled, the data are
+passed to \code{\link[=fill_legstage]{fill_legstage()}}, which writes \code{2} only where a line is
+continuing and adds \code{LEGSTAGE_FILLED}. \code{direction} does not apply to it.
 }
 
 \examples{

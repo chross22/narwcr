@@ -14,7 +14,8 @@ narwc_strip_bins(
 \item{scheme}{\code{"cetap"} or \code{"nlpsc"}.}
 
 \item{platform}{\code{"skymaster"} or \code{"at-11"}. Only affects the \code{"cetap"}
-scheme, where the bins above 1 nmi differ by aircraft.}
+scheme, where the bins above 1 nmi differ by aircraft and code \code{0} is
+listed for the AT-11 only.}
 
 \item{units}{\code{"m"} (default), \code{"km"}, or \code{"nmi"}.}
 }

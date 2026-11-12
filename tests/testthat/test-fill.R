@@ -22,10 +22,12 @@ test_that("nothing crosses a survey day or a file", {
   out <- suppressMessages(fill_narwc(gappy()))
 
   # Day 1 ends on BEAUFORT 5 and LEGTYPE 2. Neither may reach day 2's first
-  # record, which has its own values back-filled from row 6 instead.
+  # record. Its sea state is back-filled from row 6; its leg columns are not,
+  # because records before a day's first leg code are transit
+  # (?fill_narwc, "Direction").
   expect_equal(out$BEAUFORT[5], 3)
-  expect_equal(out$LEGTYPE[5], 1)
-  expect_equal(out$LEGNO[5], 7)
+  expect_true(is.na(out$LEGTYPE[5]))
+  expect_true(is.na(out$LEGNO[5]))
 
   # The ungrouped fill the original scripts used would have produced these.
   wrong <- suppressWarnings(suppressMessages(
@@ -41,7 +43,9 @@ test_that("direction is honoured", {
   expect_true(is.na(down$LEGTYPE[5]))
 
   downup <- suppressMessages(fill_narwc(gappy(), direction = "downup"))
-  expect_equal(downup$LEGTYPE[5], 1)
+  expect_equal(downup$BEAUFORT[5], 3)
+  # Leg columns are never filled backwards.
+  expect_true(is.na(downup$LEGTYPE[5]))
 })
 
 test_that("sighting columns are refused, not silently skipped", {

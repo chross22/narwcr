@@ -8,8 +8,12 @@ narwc_fetch(x, dest = NULL, drive = NULL, overwrite = FALSE, ...)
 }
 \arguments{
 \item{x}{A local path, a Google Drive file id or URL, or — with \code{drive}
-supplied — a path within that OneDrive or SharePoint drive. A local path
-that exists is returned unchanged, so wrapping a path in this is safe.}
+supplied — a path within that OneDrive or SharePoint drive. A local file
+that exists is returned unchanged, so wrapping a path in this is safe; a
+directory is an error. A bare Google Drive id is recognised only when it
+is 28 to 64 characters of \verb{[A-Za-z0-9_-]} and does not read as a file
+name (\code{survey_extract_2024_final_v2} does), so a mistyped local path is
+reported as not found rather than looked up on Google Drive.}
 
 \item{dest}{Where to write the download. \code{NULL} (default) uses a temporary
 file, which is cleaned up when the session ends.}

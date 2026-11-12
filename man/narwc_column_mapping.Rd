@@ -16,7 +16,8 @@ A tibble with \code{original}, \code{standardized}, \code{match}, and \code{fact
 \code{"inferred"} for one found after normalising case and separators. \code{factor}
 is the multiplier applied to reach the canonical unit — \code{0.3048} for an
 altitude that arrived in feet — and \code{NA} where the values were taken as
-they were. Zero rows when nothing was renamed.
+they were. Zero rows, with the same four columns, when nothing was
+renamed or \code{dat} carries no mapping.
 }
 \description{
 The record of how \code{\link[=read_narwc]{read_narwc()}} or \code{\link[=standardize_narwc_columns]{standardize_narwc_columns()}} renamed a

@@ -91,8 +91,12 @@ narwc_cloud_roots <- function() {
 #' it is large, or shared with you but not added to your drive.
 #'
 #' @param x A local path, a Google Drive file id or URL, or — with `drive`
-#'   supplied — a path within that OneDrive or SharePoint drive. A local path
-#'   that exists is returned unchanged, so wrapping a path in this is safe.
+#'   supplied — a path within that OneDrive or SharePoint drive. A local file
+#'   that exists is returned unchanged, so wrapping a path in this is safe; a
+#'   directory is an error. A bare Google Drive id is recognised only when it
+#'   is 28 to 64 characters of `[A-Za-z0-9_-]` and does not read as a file
+#'   name (`survey_extract_2024_final_v2` does), so a mistyped local path is
+#'   reported as not found rather than looked up on Google Drive.
 #' @param dest Where to write the download. `NULL` (default) uses a temporary
 #'   file, which is cleaned up when the session ends.
 #' @param drive An authenticated `Microsoft365R` drive object, from
@@ -136,11 +140,19 @@ narwc_fetch <- function(x, dest = NULL, drive = NULL, overwrite = FALSE, ...) {
 
   # An ordinary path wins over everything, so wrapping a local file is a no-op
   # and a synced cloud folder needs no special handling at all.
+  # A regular file only: `file.exists()` is TRUE for a directory too, which
+  # was then handed back as if it could be read.
   if (is.null(drive) && file.exists(x)) {
-    return(x)
+    if (dir.exists(x)) {
+      rlang::abort(paste0(
+        "`x` is a directory, not a file: ", x, ". Pass the path of the file ",
+        "inside it."
+      ))
+    }
+    if (utils::file_test("-f", x)) return(x)
   }
 
-  dest <- dest %||% tempfile(fileext = fetch_extension(x))
+  dest <- dest %||% tempfile(fileext = fetch_extension(x, list(...)$type))
   if (file.exists(dest) && !overwrite) {
     rlang::abort(paste0(
       "`dest` already exists: ", dest,
@@ -165,10 +177,22 @@ narwc_fetch <- function(x, dest = NULL, drive = NULL, overwrite = FALSE, ...) {
 }
 
 # Google Drive ids are opaque strings, so recognise the URL forms and treat a
-# bare id conservatively: long, and drawn from the character set Google uses.
+# bare id conservatively. Real ids are 28 to 44 characters drawn from
+# [A-Za-z0-9_-] - "0B..." for older files, "1..." for newer ones - and never
+# carry a file extension, which the character set already excludes. A string
+# that splits on `_` or `-` into plain words, numbers and version tags
+# ("survey_extract_2024_final_v2") is a file name that was not found, not an
+# id: a random id essentially never has that shape, and calling it one sent a
+# mistyped local path off to Google instead of saying it does not exist.
 is_google_drive <- function(x) {
-  grepl("drive\\.google\\.com|docs\\.google\\.com", x) ||
-    grepl("^[A-Za-z0-9_-]{25,}$", x)
+  if (grepl("drive\\.google\\.com|docs\\.google\\.com", x)) {
+    return(TRUE)
+  }
+  if (!grepl("^[A-Za-z0-9_-]{28,64}$", x)) {
+    return(FALSE)
+  }
+  word <- "([A-Za-z]+[0-9]*|[0-9]+)"
+  !grepl(paste0("^", word, "([_-]", word, ")+$"), x)
 }
 
 fetch_google <- function(x, dest, overwrite, ...) {
@@ -198,8 +222,21 @@ fetch_onedrive <- function(x, dest, drive, overwrite) {
   invisible(dest)
 }
 
-# Keep the extension so read.csv and friends see what they expect.
-fetch_extension <- function(x) {
+# Keep the extension so read.csv and friends see what they expect. A Google
+# export says its format in `type` (passed through to `drive_download()`) or in
+# the URL's `format=` / `exportFormat=` query, not in a file name, and a
+# workbook saved as ".csv" is not a CSV.
+fetch_extension <- function(x, type = NULL) {
+  if (is.character(type) && length(type) == 1L &&
+      grepl("^\\.?[A-Za-z0-9]{1,5}$", type)) {
+    return(paste0(".", tolower(sub("^\\.", "", type))))
+  }
+  fmt <- regmatches(
+    x, regexpr("[?&](export)?[Ff]ormat=[A-Za-z0-9]{1,5}", x)
+  )
+  if (length(fmt)) {
+    return(paste0(".", tolower(sub(".*=", "", fmt[1]))))
+  }
   ext <- regmatches(x, regexpr("\\.[A-Za-z0-9]{1,5}($|\\?)", x))
   if (!length(ext)) {
     return(".csv")

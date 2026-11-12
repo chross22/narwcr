@@ -124,7 +124,9 @@ narwcr_derived_columns <- c(
   "pt2pt.effort", "Effort", "new_trackno",
   "seg_id", "seg_no", "seg_eff", "mid_lat", "mid_lon",
   "mean_beaufort", "wt_beaufort", "n_records", "start_time", "events", "case",
-  "distance", "side", "along", "bearing", "distbegin", "distend"
+  "distance", "side", "along", "bearing", "distbegin", "distend",
+  # Markers `read_narwc()` and `fill_narwc()` add to say what they did.
+  "ALT_ASSUMED", "LEGSTAGE_FILLED"
 )
 
 # Columns of `nms` that are not NARWC handbook variables. Columns a known
@@ -134,9 +136,12 @@ narwcr_derived_columns <- c(
 # derives itself are not foreign and are excluded.
 unrecognised_columns <- function(nms) {
   schema <- narwc_schema()
+  # A column displaced by a preferred source is kept under `<target>_ORIGINAL`
+  # by `read_narwc()` itself, so it is this package's doing, not the file's.
   known <- c(
     schema$required, schema$optional, names(schema$aliases),
-    narwcr_derived_columns
+    narwcr_derived_columns,
+    paste0(names(narwc_preferred_source), "_ORIGINAL")
   )
   setdiff(nms, known)
 }
