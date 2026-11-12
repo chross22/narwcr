@@ -44,6 +44,16 @@ magnitude. `EVENTNO`, `TIME`, `LATITUDE`, and `LONGITUDE` are refused
 for the same reason: they are what makes a record distinct from the one
 before it.
 
+## `LEGSTAGE` is not in the default set
+
+`LEGSTAGE` records an event (begin, break off, resume, end), not a
+state, so carrying its value forward is wrong: a begin-line `1` copied
+down the line marks every record "begin line".
+[`fill_legstage()`](https://camilleross.org/narwcr/reference/fill_legstage.md)
+reconstructs the state instead, and
+[`fill_narwc()`](https://camilleross.org/narwcr/reference/fill_narwc.md)
+hands `LEGSTAGE` to it when asked to fill it.
+
 ## See also
 
 [`fill_narwc()`](https://camilleross.org/narwcr/reference/fill_narwc.md)
@@ -52,9 +62,9 @@ before it.
 
 ``` r
 narwc_fill_columns()
-#>  [1] "LEGTYPE"  "LEGSTAGE" "LEGNO"    "VISIBLTY" "BEAUFORT" "CLOUD"   
-#>  [7] "GLAREL"   "GLARER"   "WX"       "SURFTEMP" "ALT"      "HEADING" 
-#> [13] "PLATFORM" "STRATUM"  "BLOCK"   
+#>  [1] "LEGTYPE"  "LEGNO"    "VISIBLTY" "BEAUFORT" "CLOUD"    "GLAREL"  
+#>  [7] "GLARER"   "WX"       "SURFTEMP" "ALT"      "HEADING"  "PLATFORM"
+#> [13] "STRATUM"  "BLOCK"   
 narwc_never_fill()
 #>  [1] "SPECCODE"  "TAXCODE"   "IDREL"     "NUMBER"    "NUMCALF"   "SIGHTNO"  
 #>  [7] "STRIP"     "ANGLEL"    "ANGLER"    "S_LAT"     "S_LONG"    "S_TIME"   

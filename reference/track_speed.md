@@ -43,6 +43,24 @@ codes throughout. Speed cannot be mistaken for something else: a survey
 aircraft flies at 90-120 knots and a vessel surveys at about 10, and no
 arrangement of the other columns makes one look like the other.
 
+## Reading TIME
+
+`TIME` is hhmmss (handbook 8.A.37), but some files record four-digit
+hhmm. A value of 2359 or less is ambiguous, because it is also an hhmmss
+time before 00:24, so the form is decided per file rather than per
+record: where every non-`NA` `TIME` in a `FILEID` (or in the whole
+frame, without one) is a whole number from 0 to 2359, that file is read
+as hhmm. An hhmmss file is misread only if it was recorded entirely
+between midnight and 00:24.
+[`validate_narwc()`](https://camilleross.org/narwcr/reference/validate_narwc.md)
+applies the same rule.
+
+Where `DATE` is present the interval is taken from date and time
+together, so a pair of fixes either side of midnight has its true
+positive gap. The default grouping already separates days, so this
+matters only for a `by` that does not include `DATE`. Without `DATE`
+such an interval is negative and is `NA`.
+
 ## See also
 
 [`classify_platform()`](https://camilleross.org/narwcr/reference/classify_platform.md),

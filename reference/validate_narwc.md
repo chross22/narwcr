@@ -107,7 +107,9 @@ By default, the handbook-general set from
 
   `EVENTNO` does not increase through a `FILEID`. Repeated values are
   allowed — the handbook (4.2) assigns one event several sightings — but
-  decreases indicate mis-sorted records.
+  decreases indicate mis-sorted records. Each `EVENTNO` is compared with
+  the last non-`NA` one before it, and records with no `FILEID` are
+  checked as a group of their own.
 
 - `altitude_looks_like_feet`:
 
@@ -144,9 +146,13 @@ By default, the handbook-general set from
 
 - `bad_time_format`:
 
-  `TIME` is not a 6-digit `hhmmss` in 24-hour form (handbook 8.A.37).
-  Four-digit `hhmm` times are reported separately as a warning since
-  they are still found in older data.
+  `TIME` is not a 6-digit `hhmmss` in 24-hour form, including minutes or
+  seconds of 60 or more (handbook 8.A.37). A file whose every `TIME` is
+  2359 or less is read as four-digit `hhmm`, checked in that form, and
+  reported separately as a note, since that form is still found in older
+  data. The rule is the one
+  [`track_speed()`](https://camilleross.org/narwcr/reference/track_speed.md)
+  uses.
 
 - `coordinates_out_of_range`:
 

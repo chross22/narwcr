@@ -116,7 +116,11 @@ to find problems and
 to decide what counts as effort.
 
 A `DATE` column of class `Date` is derived from `YEAR`, `MONTH`, and
-`DAY` when all three are present.
+`DAY` when all three are present; a record whose parts do not make a
+date (a missing `YEAR`, `MONTH = 13`) gets `NA`. A supplied `DATE` may
+be `Date`, `POSIXct` (read on its own time zone), or character in
+`"2024-04-01"`, `"2024/04/01"` or `"20240401"` form; one that cannot be
+read is rebuilt from the parts, with a warning.
 
 ## Column names do not have to match exactly
 
@@ -158,10 +162,11 @@ carries both `TrkLatitude` and a plain `LATITUDE`, they are not two
 spellings of one thing: the track log is what the receiver recorded, and
 the plain column is the position entered for the platform, which on a
 file covering both a vessel and an aircraft is a different place. The
-track log wins, and the displaced column is kept as `LATITUDE_ORIGINAL`
-rather than dropped, with a warning naming both. This is the only case
-where a column already carrying a canonical name does not win;
-`prefer_source = FALSE` turns it off.
+plain column is recognised however it is spelled (`Latitude`,
+`latitude`). The track log wins, and the displaced column is kept as
+`LATITUDE_ORIGINAL` rather than dropped, with a warning naming both.
+This is the only case where a column already carrying a canonical name
+does not win; `prefer_source = FALSE` turns it off.
 
 The same applies to the clock: `TrkTime_UTC` is taken ahead of any other
 UTC spelling, and displaces a plain `TIME`. `TrkTime_Local` does not —
@@ -192,16 +197,21 @@ record number that must increase within a file; skipped numbers are
 allowed and duplicates are not, with one exception — several sightings
 may share an event number, and then *all of the non-sighting variables
 must be identical across all records*. So an event here is a run of
-consecutive records agreeing on every non-sighting variable, a number
-already recorded anywhere in that run covers the whole run, and only an
-event with no number at all is given one.
+consecutive records agreeing on every non-sighting variable, a record of
+that run with no number takes the first number recorded in the run, and
+an event with no number at all is given the next free one after its
+predecessor.
 
-Where the recorded numbers leave no room for an event being inserted,
-the numbers from that point forward are increased. That is the
-handbook's own remedy — "it is usually necessary to correct the event
-numbers from that point forward in the file" — and it warns, because
-records elsewhere referring to the old numbers past that point will no
-longer match.
+Only missing values are supplied. A recorded `EVENTNO` is never changed,
+and a FILEID with no missing value is not touched at all, so duplicates
+and decreases in the recorded numbers remain for
+[`validate_narwc()`](https://camilleross.org/narwcr/reference/validate_narwc.md)
+to report. Where the recorded numbers leave no free whole number for an
+event being inserted, it is given a fractional number between its
+neighbours, with a warning. The handbook's remedy, "it is usually
+necessary to correct the event numbers from that point forward in the
+file", changes recorded identifiers and is left to whoever corrects the
+file.
 
 Only values are supplied, never the column itself. A file with no
 `EVENTNO` column is missing a required variable, and inventing one would
@@ -216,11 +226,13 @@ the way in, and the multiplier is recorded in the `factor` column of
 [`narwc_column_mapping()`](https://camilleross.org/narwcr/reference/narwc_column_mapping.md).
 A file carrying both `TrkAltitude_m` and `TrkAltitude_ft` uses the
 metres one and converts nothing — unless the metres column is empty, in
-which case the feet one is used and converted. Precedence is written
-over spellings and says nothing about which column a file actually
-filled in, so a column with no values in it never outranks one that has
-them. The same applies to the GPS track columns: an empty `TrkLatitude`
-displaces nothing.
+which case the feet one is used and converted. Where the chosen column
+has gaps that a losing spelling covers, the gaps are filled from it
+after converting it by its own factor, so feet never reach `ALT`
+unconverted. Precedence is written over spellings and says nothing about
+which column a file actually filled in, so a column with no values in it
+never outranks one that has them. The same applies to the GPS track
+columns: an empty `TrkLatitude` displaces nothing.
 
 ## Columns that are not in the handbook
 

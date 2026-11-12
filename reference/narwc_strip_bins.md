@@ -24,7 +24,8 @@ narwc_strip_bins(
 - platform:
 
   `"skymaster"` or `"at-11"`. Only affects the `"cetap"` scheme, where
-  the bins above 1 nmi differ by aircraft.
+  the bins above 1 nmi differ by aircraft and code `0` is listed for the
+  AT-11 only.
 
 - units:
 

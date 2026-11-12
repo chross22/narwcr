@@ -16,8 +16,12 @@ narwc_fetch(x, dest = NULL, drive = NULL, overwrite = FALSE, ...)
 
   A local path, a Google Drive file id or URL, or — with `drive`
   supplied — a path within that OneDrive or SharePoint drive. A local
-  path that exists is returned unchanged, so wrapping a path in this is
-  safe.
+  file that exists is returned unchanged, so wrapping a path in this is
+  safe; a directory is an error. A bare Google Drive id is recognised
+  only when it is 28 to 64 characters of `[A-Za-z0-9_-]` and does not
+  read as a file name (`survey_extract_2024_final_v2` does), so a
+  mistyped local path is reported as not found rather than looked up on
+  Google Drive.
 
 - dest:
 

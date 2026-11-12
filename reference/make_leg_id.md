@@ -52,7 +52,13 @@ begin-line events.
 
 - A change of `LEGNO`:
 
-  Opens an occupation, as it always has.
+  Opens an occupation, as it always has. A record with no `LEGNO`
+  belongs to the occupation it falls in rather than starting one, so a
+  `LEGNO` is compared with the last one recorded earlier that day, and a
+  line that drops its number for a record and picks it up again stays
+  one occupation. The day's first `LEGNO` opens an occupation unless a
+  begin-line record since the previous `LEGNO` already opened it; it
+  then names that occupation.
 
 - A run of census track:
 

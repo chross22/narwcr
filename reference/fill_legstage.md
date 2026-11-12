@@ -52,6 +52,9 @@ What carries forward is the *state*, not the code. Handbook 8.A.20:
 | after 5 end       | the line is over — left `NA`       |
 | before any event  | unknown — left `NA`                |
 
+Codes 6 and 7 mark a kind of sighting rather than a stage of the line.
+They are left as recorded and do not change the state carried past them.
+
 So the only code ever written is `2`, and only where the line is
 genuinely continuing. A record before the first event, during a circle,
 or after the line closed keeps its `NA` and stays ineligible — which is

@@ -30,7 +30,9 @@ fill_narwc(
   [`narwc_fill_columns()`](https://camilleross.org/narwcr/reference/narwc_fill_columns.md).
   Anything in
   [`narwc_never_fill()`](https://camilleross.org/narwcr/reference/narwc_fill_columns.md)
-  is an error rather than a silent omission.
+  is an error rather than a silent omission. `LEGSTAGE` is accepted and
+  handed to
+  [`fill_legstage()`](https://camilleross.org/narwcr/reference/fill_legstage.md).
 
 - by:
 
@@ -48,7 +50,8 @@ fill_narwc(
 
 ## Value
 
-`dat` with the requested columns filled.
+`dat` with the requested columns filled, plus `LEGSTAGE_FILLED` when
+`LEGSTAGE` was requested.
 
 ## Grouping is the whole point
 
@@ -77,20 +80,28 @@ asserts it matched whatever was recorded first. Where a day's records
 begin on transit before the first `LEGTYPE` is entered, back-filling a
 `2` would mark that transit as census effort.
 
+For that reason the leg columns `LEGTYPE` and `LEGNO` are never filled
+backwards, whatever `direction` says. Records before the first leg code
+of a group are transit out to the survey area by convention, and
+[`make_leg_id()`](https://camilleross.org/narwcr/reference/make_leg_id.md)
+leaves them outside any line. The backward pass applies to the
+sighting-condition, platform and design columns only.
+
 Because those are the inferred values rather than the recovered ones,
 the report counts them separately. A large backward count is worth
 looking at.
 
-## A caution on `LEGSTAGE`
+## `LEGSTAGE` goes through [`fill_legstage()`](https://camilleross.org/narwcr/reference/fill_legstage.md)
 
-Filling `LEGSTAGE` down is the least safe of the defaults. If a file
-records `1` (begin line) and leaves the continuation rows blank, filling
-down marks every record of that line as "begin line" rather than `2`
-(continue) — and since on-effort eligibility is `LEGSTAGE == 2`, the
-whole line would drop out of every distance calculation. Whether that
-happens depends on the recording convention of the file in hand. Check
-the `LEGSTAGE` counts in the report against what you expect before
-trusting a filled column.
+`LEGSTAGE` is not in the default set. Carrying its value forward marks
+every record of a line "begin line" when only the first record carries a
+`1`, and since on-effort eligibility is `LEGSTAGE == 2` the whole line
+would drop out of every distance calculation. When `LEGSTAGE` is named
+in `columns` it is not filled as a value: after the other columns are
+filled, the data are passed to
+[`fill_legstage()`](https://camilleross.org/narwcr/reference/fill_legstage.md),
+which writes `2` only where a line is continuing and adds
+`LEGSTAGE_FILLED`. `direction` does not apply to it.
 
 ## References
 
@@ -115,14 +126,12 @@ fill_narwc(dat)
 #> `fill_narwc()` filled 7 values, grouped by FILEID, DATE.
 #>   carried forward:  7
 #>   BEAUFORT 4, LEGTYPE 3
-#> # A tibble: 5 × 5
-#>   FILEID DATE       EVENTNO LEGTYPE BEAUFORT
-#>   <chr>  <date>       <int>   <dbl>    <dbl>
-#> 1 A      2024-04-01       1       2        3
-#> 2 A      2024-04-01       2       2        3
-#> 3 A      2024-04-01       3       2        3
-#> 4 A      2024-04-01       4       1        3
-#> 5 A      2024-04-01       5       1        3
+#>   FILEID       DATE EVENTNO LEGTYPE BEAUFORT
+#> 1      A 2024-04-01       1       2        3
+#> 2      A 2024-04-01       2       2        3
+#> 3      A 2024-04-01       3       2        3
+#> 4      A 2024-04-01       4       1        3
+#> 5      A 2024-04-01       5       1        3
 
 # Refuses to replicate a sighting
 try(fill_narwc(dat, columns = "NUMBER"))

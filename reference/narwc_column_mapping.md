@@ -29,7 +29,8 @@ is either `"alias"` for an exact entry in the alias table or
 `"inferred"` for one found after normalising case and separators.
 `factor` is the multiplier applied to reach the canonical unit —
 `0.3048` for an altitude that arrived in feet — and `NA` where the
-values were taken as they were. Zero rows when nothing was renamed.
+values were taken as they were. Zero rows, with the same four columns,
+when nothing was renamed or `dat` carries no mapping.
 
 ## Why keep it
 
