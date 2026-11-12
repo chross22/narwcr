@@ -25,6 +25,12 @@
 #' `LATITUDE`, and `LONGITUDE` are refused for the same reason: they are what
 #' makes a record distinct from the one before it.
 #'
+#' @section `LEGSTAGE` is not in the default set:
+#' `LEGSTAGE` records an event (begin, break off, resume, end), not a state, so
+#' carrying its value forward is wrong: a begin-line `1` copied down the line
+#' marks every record "begin line". [fill_legstage()] reconstructs the state
+#' instead, and [fill_narwc()] hands `LEGSTAGE` to it when asked to fill it.
+#'
 #' @return `narwc_fill_columns()` returns a character vector of fillable column
 #'   names; `narwc_never_fill()` returns those that are refused.
 #'
@@ -37,8 +43,9 @@
 #' @export
 narwc_fill_columns <- function() {
   c(
-    # Leg state
-    "LEGTYPE", "LEGSTAGE", "LEGNO",
+    # Leg state. Not LEGSTAGE: it records events, and `fill_legstage()`
+    # reconstructs the state between them.
+    "LEGTYPE", "LEGNO",
     # Sighting conditions
     "VISIBLTY", "BEAUFORT", "CLOUD", "GLAREL", "GLARER", "WX", "SURFTEMP",
     # Platform state
@@ -106,28 +113,36 @@ narwc_sighting_columns <- function() {
 #' first `LEGTYPE` is entered, back-filling a `2` would mark that transit as
 #' census effort.
 #'
+#' For that reason the leg columns `LEGTYPE` and `LEGNO` are never filled
+#' backwards, whatever `direction` says. Records before the first leg code of
+#' a group are transit out to the survey area by convention, and
+#' [make_leg_id()] leaves them outside any line. The backward pass applies to
+#' the sighting-condition, platform and design columns only.
+#'
 #' Because those are the inferred values rather than the recovered ones, the
 #' report counts them separately. A large backward count is worth looking at.
 #'
-#' @section A caution on `LEGSTAGE`:
-#' Filling `LEGSTAGE` down is the least safe of the defaults. If a file records
-#' `1` (begin line) and leaves the continuation rows blank, filling down marks
-#' every record of that line as "begin line" rather than `2` (continue) — and
-#' since on-effort eligibility is `LEGSTAGE == 2`, the whole line would drop out
-#' of every distance calculation. Whether that happens depends on the recording
-#' convention of the file in hand. Check the `LEGSTAGE` counts in the report
-#' against what you expect before trusting a filled column.
+#' @section `LEGSTAGE` goes through [fill_legstage()]:
+#' `LEGSTAGE` is not in the default set. Carrying its value forward marks every
+#' record of a line "begin line" when only the first record carries a `1`, and
+#' since on-effort eligibility is `LEGSTAGE == 2` the whole line would drop out
+#' of every distance calculation. When `LEGSTAGE` is named in `columns` it is
+#' not filled as a value: after the other columns are filled, the data are
+#' passed to [fill_legstage()], which writes `2` only where a line is
+#' continuing and adds `LEGSTAGE_FILLED`. `direction` does not apply to it.
 #'
 #' @param dat A data frame of NARWC survey data, in survey order.
 #' @param columns Columns to fill. Defaults to [narwc_fill_columns()]. Anything
 #'   in [narwc_never_fill()] is an error rather than a silent omission.
+#'   `LEGSTAGE` is accepted and handed to [fill_legstage()].
 #' @param by Grouping columns. `NULL` (default) uses `FILEID` and `DATE` where
 #'   present.
 #' @param direction `"downup"` (default), `"down"`, or `"up"`, as
 #'   [tidyr::fill()].
 #' @param quiet Suppress the report of what was filled. Default `FALSE`.
 #'
-#' @return `dat` with the requested columns filled.
+#' @return `dat` with the requested columns filled, plus `LEGSTAGE_FILLED` when
+#'   `LEGSTAGE` was requested.
 #'
 #' @references
 #' Kenney, R.D. (2023) *The North Atlantic Right Whale Consortium Database: A
@@ -168,6 +183,17 @@ fill_narwc <- function(dat, columns = narwc_fill_columns(), by = NULL,
     return(dat)
   }
 
+  # LEGSTAGE is an event code, not a state; its state is reconstructed by
+  # fill_legstage() after LEGTYPE, which it reads, has been filled.
+  legstage <- "LEGSTAGE" %in% cols
+  cols <- setdiff(cols, "LEGSTAGE")
+  if (!length(cols)) {
+    return(fill_legstage(dat, by = by, quiet = quiet))
+  }
+
+  # fill_legstage() has its own default (LEGNO3 when present), so it is given
+  # only a grouping the caller chose.
+  legstage_by <- by
   if (is.null(by)) by <- default_fill_grouping(dat)
   if (!length(by)) {
     rlang::warn(paste0(
@@ -195,19 +221,27 @@ fill_narwc <- function(dat, columns = narwc_fill_columns(), by = NULL,
     filled_down <- before - mid
   }
 
+  # Never backwards for the leg columns: the records before a group's first
+  # leg code are transit, and back-filling LEGTYPE 2 would make them census.
+  up_cols <- setdiff(cols, c("LEGTYPE", "LEGNO"))
   filled_up <- stats::setNames(integer(length(cols)), cols)
-  if (direction %in% c("up", "downup")) {
-    mid <- vapply(out[cols], function(x) sum(is.na(x)), integer(1))
-    out <- tidyr::fill(out, dplyr::all_of(cols), .direction = "up")
-    after <- vapply(out[cols], function(x) sum(is.na(x)), integer(1))
-    filled_up <- mid - after
+  if (direction %in% c("up", "downup") && length(up_cols)) {
+    mid <- vapply(out[up_cols], function(x) sum(is.na(x)), integer(1))
+    out <- tidyr::fill(out, dplyr::all_of(up_cols), .direction = "up")
+    after <- vapply(out[up_cols], function(x) sum(is.na(x)), integer(1))
+    filled_up[up_cols] <- mid - after
   }
 
   out <- dplyr::ungroup(out)
+  # tidyr returns a tibble; hand back what was given.
+  if (!inherits(dat, "tbl_df")) out <- as.data.frame(out)
   class(out) <- unique(c(setdiff(class(dat), class(out)), class(out)))
 
   if (!quiet) {
     report_filled(filled_down, filled_up, by)
+  }
+  if (legstage) {
+    out <- fill_legstage(out, by = legstage_by, quiet = quiet)
   }
   out
 }

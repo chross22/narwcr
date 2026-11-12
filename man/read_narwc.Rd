@@ -85,7 +85,11 @@ repair, or reject anything — use \code{\link[=validate_narwc]{validate_narwc()
 \code{\link[=flag_effort]{flag_effort()}} to decide what counts as effort.
 
 A \code{DATE} column of class \code{Date} is derived from \code{YEAR}, \code{MONTH}, and \code{DAY}
-when all three are present.
+when all three are present; a record whose parts do not make a date (a
+missing \code{YEAR}, \code{MONTH = 13}) gets \code{NA}. A supplied \code{DATE} may be \code{Date},
+\code{POSIXct} (read on its own time zone), or character in \code{"2024-04-01"},
+\code{"2024/04/01"} or \code{"20240401"} form; one that cannot be read is rebuilt from
+the parts, with a warning.
 }
 \section{Column names do not have to match exactly}{
 
@@ -128,7 +132,8 @@ A \verb{Trk*} column is the platform's own GPS track log. Where a file carries
 both \code{TrkLatitude} and a plain \code{LATITUDE}, they are not two spellings of one
 thing: the track log is what the receiver recorded, and the plain column is
 the position entered for the platform, which on a file covering both a vessel
-and an aircraft is a different place. The track log wins, and the displaced
+and an aircraft is a different place. The plain column is recognised however
+it is spelled (\code{Latitude}, \code{latitude}). The track log wins, and the displaced
 column is kept as \code{LATITUDE_ORIGINAL} rather than dropped, with a warning
 naming both. This is the only case where a column already carrying a
 canonical name does not win; \code{prefer_source = FALSE} turns it off.
@@ -160,15 +165,18 @@ record number that must increase within a file; skipped numbers are allowed
 and duplicates are not, with one exception — several sightings may share an
 event number, and then \emph{all of the non-sighting variables must be identical
 across all records}. So an event here is a run of consecutive records
-agreeing on every non-sighting variable, a number already recorded anywhere
-in that run covers the whole run, and only an event with no number at all is
-given one.
+agreeing on every non-sighting variable, a record of that run with no number
+takes the first number recorded in the run, and an event with no number at
+all is given the next free one after its predecessor.
 
-Where the recorded numbers leave no room for an event being inserted, the
-numbers from that point forward are increased. That is the handbook's own
-remedy — "it is usually necessary to correct the event numbers from that
-point forward in the file" — and it warns, because records elsewhere
-referring to the old numbers past that point will no longer match.
+Only missing values are supplied. A recorded \code{EVENTNO} is never changed, and
+a FILEID with no missing value is not touched at all, so duplicates and
+decreases in the recorded numbers remain for \code{\link[=validate_narwc]{validate_narwc()}} to report.
+Where the recorded numbers leave no free whole number for an event being
+inserted, it is given a fractional number between its neighbours, with a
+warning. The handbook's remedy, "it is usually necessary to correct the
+event numbers from that point forward in the file", changes recorded
+identifiers and is left to whoever corrects the file.
 
 Only values are supplied, never the column itself. A file with no \code{EVENTNO}
 column is missing a required variable, and inventing one would hide that.
@@ -182,7 +190,9 @@ distances in \code{distsamp}. A column whose \emph{name} declares feet — \code
 multiplier is recorded in the \code{factor} column of \code{\link[=narwc_column_mapping]{narwc_column_mapping()}}.
 A file carrying both \code{TrkAltitude_m} and \code{TrkAltitude_ft} uses the metres one
 and converts nothing — unless the metres column is empty, in which case the
-feet one is used and converted. Precedence is written over spellings and
+feet one is used and converted. Where the chosen column has gaps that a
+losing spelling covers, the gaps are filled from it after converting it by
+its own factor, so feet never reach \code{ALT} unconverted. Precedence is written over spellings and
 says nothing about which column a file actually filled in, so a column with
 no values in it never outranks one that has them. The same applies to the
 GPS track columns: an empty \code{TrkLatitude} displaces nothing.

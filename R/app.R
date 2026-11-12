@@ -137,6 +137,8 @@ run_narwc_app <- function(dat = NULL, pam = NULL, ...) {
   } else if (!is.null(pam) && !is.data.frame(pam)) {
     rlang::abort("`pam` must be a data frame or a path to a CSV.")
   }
+  # A data frame is passed through as it is. The app matches its columns with
+  # `normalise_pam()`, the same loose matching a file gets (inst/shiny/app.R).
 
   # An installation with no `shiny/` in it is not a broken app, it is a
   # narwcr built before the app existed - or one installed underneath a session

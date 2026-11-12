@@ -44,6 +44,9 @@ after 5 end \tab the line is over — left \code{NA} \cr
 before any event \tab unknown — left \code{NA}
 }
 
+Codes 6 and 7 mark a kind of sighting rather than a stage of the line. They
+are left as recorded and do not change the state carried past them.
+
 So the only code ever written is \code{2}, and only where the line is genuinely
 continuing. A record before the first event, during a circle, or after the
 line closed keeps its \code{NA} and stays ineligible — which is correct, because

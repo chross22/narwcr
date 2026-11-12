@@ -22,6 +22,9 @@
 #'   before any event \tab unknown — left `NA`
 #' }
 #'
+#' Codes 6 and 7 mark a kind of sighting rather than a stage of the line. They
+#' are left as recorded and do not change the state carried past them.
+#'
 #' So the only code ever written is `2`, and only where the line is genuinely
 #' continuing. A record before the first event, during a circle, or after the
 #' line closed keeps its `NA` and stays ineligible — which is correct, because
@@ -85,8 +88,11 @@ fill_legstage <- function(dat, by = NULL, quiet = FALSE) {
 
   # Last recorded LEGSTAGE at or before each record, never carried across an
   # occupation boundary. A sentinel at the start of a group that has no code
-  # of its own stops the previous group's state leaking in.
+  # of its own stops the previous group's state leaking in. Codes 6 and 7 mark
+  # a kind of sighting, not a stage of the line, so they are skipped and the
+  # line state carries past them (as in `legstage_sequence_check()`).
   val <- stage
+  val[!is.na(val) & (val < 1L | val > 5L)] <- NA_integer_
   val[starts & is.na(val)] <- -1L
   known <- which(!is.na(val))
   at <- findInterval(seq_len(n), known)

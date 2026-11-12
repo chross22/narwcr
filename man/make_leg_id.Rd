@@ -40,7 +40,13 @@ begin-line events.
 \item{A begin-line record}{\code{LEGSTAGE == 1} always opens an occupation.
 Without this a line flown twice under one number is silently a single
 occupation, since nothing about \code{LEGNO} changes between the two.}
-\item{A change of \code{LEGNO}}{Opens an occupation, as it always has.}
+\item{A change of \code{LEGNO}}{Opens an occupation, as it always has. A
+record with no \code{LEGNO} belongs to the occupation it falls in rather than
+starting one, so a \code{LEGNO} is compared with the last one recorded
+earlier that day, and a line that drops its number for a record and
+picks it up again stays one occupation. The day's first \code{LEGNO} opens
+an occupation unless a begin-line record since the previous \code{LEGNO}
+already opened it; it then names that occupation.}
 \item{A run of census track}{Only where the day records neither of the
 above. This is inference rather than a reading of what was recorded, so
 those occupations are named \verb{derived_<n>} and reported.}

@@ -130,7 +130,9 @@ narwc_checks <- function() {
 #'     later legitimately has none.}
 #'   \item{`eventno_not_increasing`}{`EVENTNO` does not increase through a
 #'     `FILEID`. Repeated values are allowed — the handbook (4.2) assigns one
-#'     event several sightings — but decreases indicate mis-sorted records.}
+#'     event several sightings — but decreases indicate mis-sorted records.
+#'     Each `EVENTNO` is compared with the last non-`NA` one before it, and
+#'     records with no `FILEID` are checked as a group of their own.}
 #'   \item{`altitude_looks_like_feet`}{The median `ALT` is implausible read as
 #'     metres for a survey aircraft and ordinary read as feet. Handbook 8.A.1
 #'     says `ALT` is metres, but also that nearly all submissions arrive in
@@ -153,9 +155,11 @@ narwc_checks <- function() {
 #'     removed before analysis (handbook 8.A.27). A note, not a warning: the
 #'     file is correct, and duplicates of it are expected. The analysis has to
 #'     exclude them.}
-#'   \item{`bad_time_format`}{`TIME` is not a 6-digit `hhmmss` in 24-hour form
-#'     (handbook 8.A.37). Four-digit `hhmm` times are reported separately as a
-#'     warning since they are still found in older data.}
+#'   \item{`bad_time_format`}{`TIME` is not a 6-digit `hhmmss` in 24-hour form,
+#'     including minutes or seconds of 60 or more (handbook 8.A.37). A file
+#'     whose every `TIME` is 2359 or less is read as four-digit `hhmm`, checked
+#'     in that form, and reported separately as a note, since that form is
+#'     still found in older data. The rule is the one [track_speed()] uses.}
 #'   \item{`coordinates_out_of_range`}{Latitude outside \[-90, 90\] or longitude
 #'     outside \[-180, 180\].}
 #'   \item{`positive_west_longitude`}{Every longitude is positive. Handbook
@@ -352,9 +356,13 @@ check_event_order <- function(dat) {
     return(NULL)
   }
 
+  # NA-aware grouping: `FILEID == NA` matches nothing, so records with no
+  # FILEID are a group of their own. Within a group, an NA EVENTNO is skipped
+  # so it cannot hide a decrease across it.
+  fileid <- ifelse(is.na(dat$FILEID), "\rNA", as.character(dat$FILEID))
   bad <- integer(0)
-  for (fid in unique(dat$FILEID)) {
-    idx <- which(dat$FILEID == fid)
+  for (fid in unique(fileid)) {
+    idx <- which(fileid == fid & !is.na(dat$EVENTNO))
     ev <- dat$EVENTNO[idx]
     drops <- which(diff(ev) < 0)
     if (length(drops)) bad <- c(bad, idx[drops + 1L])
@@ -371,20 +379,29 @@ check_time_format <- function(dat) {
     return(NULL)
   }
 
-  tm <- dat$TIME
-  ok <- is.na(tm) | (tm >= 0 & tm <= 235959)
+  # A file whose every TIME is 0-2359 is read as hhmm, as `track_speed()`
+  # reads it (see `?track_speed`, "Reading TIME"), and checked in that form.
+  tm <- suppressWarnings(as.numeric(dat$TIME))
+  hhmm <- narwc_time_is_hhmm(dat)
+  full <- ifelse(hhmm, tm * 100, tm)
+  ok <- is.na(tm) | (full >= 0 & full <= 235959 &
+                       (full %/% 100) %% 100 < 60 & full %% 100 < 60)
 
   list(
     flag(
       "bad_time_format", "warning", "TIME", which(!ok),
-      "TIME outside the range of a valid hhmmss clock time (handbook 8.A.37)."
+      paste0(
+        "TIME is not a valid hhmmss clock time: outside 0-235959, or minutes ",
+        "or seconds of 60 or more (handbook 8.A.37)."
+      )
     ),
     flag(
       "bad_time_format", "note", "TIME",
-      which(!is.na(tm) & tm > 0 & tm <= 2359 & tm %% 1 == 0),
+      which(!is.na(tm) & hhmm),
       paste0(
-        "TIME values look like four-digit hhmm rather than six-digit hhmmss ",
-        "(handbook 8.A.37). Ambiguous with early-morning hhmmss times."
+        "Every TIME in these files is 2359 or less, so they are read as ",
+        "four-digit hhmm rather than six-digit hhmmss (handbook 8.A.37). An ",
+        "hhmmss file recorded entirely before 00:24 would look the same."
       )
     )
   )
@@ -549,13 +566,21 @@ legstage_sequence_check <- function(dat) {
     return(empty)
   }
 
+  day <- if ("DATE" %in% names(dat)) as.character(dat$DATE) else
+    rep("", nrow(dat))
   occupation <- if ("LEGNO3" %in% names(dat)) {
     as.character(dat$LEGNO3)
   } else {
+    # A record with no LEGNO carries the occupation it falls in, as in
+    # make_leg_id(); a run of NA is not an occupation of its own. Begin-line
+    # records do not open an occupation here - a stray 1 mid-line is what
+    # this check exists to find - but one before a day's first LEGNO lets that
+    # LEGNO name it rather than split it.
     legno <- as.character(dat$LEGNO)
-    paste(legno, rle_id(legno), sep = "_")
+    begin <- !is.na(stage) & stage == 1L & on_census
+    new_day <- c(TRUE, day[-1] != day[-length(day)])
+    cumsum(new_day | legno_starts(legno, day, begin))
   }
-  day <- if ("DATE" %in% names(dat)) as.character(dat$DATE) else ""
   key <- paste(day, occupation)[keep]
   stage <- stage[keep]
 

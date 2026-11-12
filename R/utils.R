@@ -71,8 +71,13 @@ has_values <- function(x) {
   any(!is.na(blank_to_na(x)))
 }
 
-# Treat the NARWC missing-value placeholder "." (and blanks) as NA.
+# Treat the NARWC missing-value placeholder "." (and blanks) as NA. A factor is
+# turned into character first: its "." is a level like any other, and leaving
+# it a factor would also hand its level codes, not its labels, to as.numeric().
 blank_to_na <- function(x) {
+  if (is.factor(x)) {
+    x <- as.character(x)
+  }
   if (!is.character(x)) {
     return(x)
   }
@@ -91,7 +96,11 @@ rle_id <- function(x) {
   cumsum(c(TRUE, key[-1] != key[-length(key)]))
 }
 
-# `%||%` without depending on a particular rlang export version.
+# `x`, or `y` where `x` is NULL. Base R has this only from 4.4.0 and the
+# package supports 4.1, so it is defined here rather than relied on.
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+# Elementwise: `x`, or `y` where `x` is NA.
 `%|NA|%` <- function(x, y) ifelse(is.na(x), y, x)
 
 is_empty_df <- function(x) is.null(x) || nrow(x) == 0L

@@ -38,6 +38,23 @@ flies at 90-120 knots and a vessel surveys at about 10, and no arrangement
 of the other columns makes one look like the other.
 }
 
+\section{Reading TIME}{
+
+\code{TIME} is hhmmss (handbook 8.A.37), but some files record four-digit hhmm.
+A value of 2359 or less is ambiguous, because it is also an hhmmss time
+before 00:24, so the form is decided per file rather than per record: where
+every non-\code{NA} \code{TIME} in a \code{FILEID} (or in the whole frame, without one) is
+a whole number from 0 to 2359, that file is read as hhmm. An hhmmss file is
+misread only if it was recorded entirely between midnight and 00:24.
+\code{\link[=validate_narwc]{validate_narwc()}} applies the same rule.
+
+Where \code{DATE} is present the interval is taken from date and time together,
+so a pair of fixes either side of midnight has its true positive gap. The
+default grouping already separates days, so this matters only for a \code{by}
+that does not include \code{DATE}. Without \code{DATE} such an interval is negative
+and is \code{NA}.
+}
+
 \examples{
 path <- system.file("extdata", "narwc-example.csv", package = "narwcr")
 dat <- make_leg_id(read_narwc(path, quiet = TRUE), quiet = TRUE)

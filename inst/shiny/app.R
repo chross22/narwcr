@@ -282,19 +282,28 @@ survey_type <- function(dat) {
 # of one occupation. The handbook (8.A.10) notes that the further apart two
 # fixes are the less a straight line between them reconstructs what was flown,
 # so where the receiver recorded its own TRKDIST that is used instead.
+#
+# TRKDIST is the distance *into* a fix from the one before it in the file. The
+# first fix of a track therefore carries the leg from wherever the platform was
+# beforehand - off effort, or on another line - and it is not counted, exactly
+# as the straight-line sum does not count it. A step whose TRKDIST was not
+# recorded falls back to the straight line rather than counting as nothing.
 track_km <- function(dat) {
-  if (!nrow(dat)) return(0)
-  if ("TRKDIST" %in% names(dat) && any(!is.na(dat$TRKDIST))) {
-    return(sum(as.numeric(dat$TRKDIST), na.rm = TRUE) / 1000)
-  }
   n <- nrow(dat)
   if (n < 2L) return(0)
   same <- dat$TRACK[-n] == dat$TRACK[-1]
+  # Within one track, a step across an off-effort stretch is not on-effort
+  # distance; effort_track() marks the runs that are.
+  if ("EFFRUN" %in% names(dat)) same <- same & dat$EFFRUN[-n] == dat$EFFRUN[-1]
   # narwcr's own haversine, called from narwcr's own app, so a distance shown
   # here and a distance computed by the package are the same number.
   step <- narwcr:::haversine_km(
     dat$LATITUDE[-n], dat$LONGITUDE[-n], dat$LATITUDE[-1], dat$LONGITUDE[-1]
   )
+  if ("TRKDIST" %in% names(dat)) {
+    measured <- suppressWarnings(as.numeric(dat$TRKDIST[-1])) / 1000
+    step <- ifelse(is.na(measured), step, measured)
+  }
   sum(step[same], na.rm = TRUE)
 }
 
@@ -345,7 +354,12 @@ lump_species <- function(code, max_levels = 8L) {
 # All the popups at once. Built row by row this was a data-frame subset per
 # sighting, which is a visible pause on an archive carrying tens of thousands
 # of them; there is nothing here that has to look at one row.
-sighting_popups <- function(dat, bathy = NULL) {
+#
+# `min_vis` is the sidebar's visibility threshold, so the verdict a popup gives
+# is the one `flag_effort()` gave the record. NULL is the criterion switched
+# off, and then there is no verdict to give: "below threshold" against a
+# threshold nobody is applying is a claim about nothing.
+sighting_popups <- function(dat, bathy = NULL, min_vis = 2) {
   n <- nrow(dat)
   if (!n) return(character(0))
 
@@ -363,7 +377,9 @@ sighting_popups <- function(dat, bathy = NULL) {
   vis_text <- ifelse(is.na(vis), NA_character_,
                      ifelse(vis < 0, code_meaning("VISIBLTY", vis),
                             paste0(vis, " nmi")))
-  ok <- suppressWarnings(visibility_ok(vis))
+  ok <- if (is.null(min_vis)) rep(NA, n) else {
+    suppressWarnings(visibility_ok(vis, min_nmi = min_vis))
+  }
   vis_text <- ifelse(is.na(vis_text) | is.na(ok), vis_text,
                      paste0(vis_text,
                             ifelse(ok, " (acceptable)", " (below threshold)")))
@@ -663,7 +679,9 @@ pam_aliases <- list(
   LATITUDE = c("LATITUDE", "LAT", "LATDD", "LATITUDEDD", "YCOORD"),
   LONGITUDE = c("LONGITUDE", "LON", "LONG", "LONDD", "LONGDD",
                 "LONGITUDEDD", "XCOORD"),
-  DATE = c("DATE", "DAY", "DATETIME", "STARTDATE", "RECORDINGDATE"),
+  # Not DAY: a file carrying YEAR, MONTH and DAY is a date in three columns,
+  # and reading the day of the month as the whole date loses the other two.
+  DATE = c("DATE", "DATETIME", "STARTDATE", "RECORDINGDATE"),
   SPECIES = c("SPECIES", "SPECCODE", "SPP", "SPECIESCODE", "CALLTYPE"),
   DETECTED = c("DETECTED", "DETECTION", "PRESENCE", "PRESENT", "OCCURRENCE",
                "ACOUSTICPRESENCE"),
@@ -690,8 +708,41 @@ is_detected <- function(x) {
   out
 }
 
+# A date in any of the spellings a station-day file turns up in, each format
+# named rather than left to `as.Date()` to guess: unguided, it reads
+# "01/05/2020" as the year 1 and says nothing. ISO first, then the US
+# month/day/year a spreadsheet writes. A year before 1900 or after 2100 is a
+# misread rather than a recording, so it is left unparsed and counted.
+pam_date_formats <- c("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%m-%d-%Y",
+                      "%d.%m.%Y", "%Y%m%d")
+
+parse_pam_date <- function(x) {
+  if (inherits(x, "Date")) return(x)
+  if (inherits(x, "POSIXt")) return(as.Date(x))
+  v <- trimws(as.character(x))
+  out <- as.Date(rep(NA_character_, length(v)))
+  for (f in pam_date_formats) {
+    todo <- is.na(out) & !is.na(v) & nzchar(v)
+    if (!any(todo)) break
+    got <- as.Date(v[todo], format = f)
+    yr <- as.integer(format(got, "%Y"))
+    got[!is.na(yr) & (yr < 1900L | yr > 2100L)] <- NA
+    out[todo] <- got
+  }
+  out
+}
+
 read_pam <- function(path) {
-  raw <- utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  normalise_pam(
+    utils::read.csv(path, stringsAsFactors = FALSE, check.names = FALSE)
+  )
+}
+
+# The loose matching itself, apart from the file. A table handed to
+# `run_narwc_app(pam = )` goes through here exactly as a file read from disk
+# does, so the two cannot drift into different shapes.
+normalise_pam <- function(raw) {
+  raw <- as.data.frame(raw, stringsAsFactors = FALSE)
   key <- toupper(gsub("[^A-Za-z0-9]", "", names(raw)))
 
   matched <- character(0)
@@ -716,18 +767,21 @@ read_pam <- function(path) {
   if (all(is.na(out$STATION))) out$STATION <- "unnamed station"
 
   d <- take("DATE")
+  given <- rep(NA_character_, nrow(raw))
   out$DATE <- if (is.null(d)) {
     parts <- c("YEAR", "MONTH", "DAY") %in% key
     if (all(parts)) {
-      as.Date(sprintf("%04d-%02d-%02d",
-                      as.integer(raw[[which(key == "YEAR")[1]]]),
-                      as.integer(raw[[which(key == "MONTH")[1]]]),
-                      as.integer(raw[[which(key == "DAY")[1]]])))
+      part <- function(k) suppressWarnings(as.integer(raw[[which(key == k)[1]]]))
+      y <- part("YEAR"); m <- part("MONTH"); dd <- part("DAY")
+      given <- ifelse(is.na(y) | is.na(m) | is.na(dd), NA_character_,
+                      sprintf("%04d-%02d-%02d", y, m, dd))
+      parse_pam_date(given)
     } else {
       as.Date(rep(NA, nrow(raw)))
     }
   } else {
-    suppressWarnings(as.Date(as.character(d)))
+    if (!inherits(d, c("Date", "POSIXt"))) given <- trimws(as.character(d))
+    parse_pam_date(d)
   }
   out$YEAR <- as.integer(format(out$DATE, "%Y"))
   out$MONTH <- as.integer(format(out$DATE, "%m"))
@@ -747,11 +801,26 @@ read_pam <- function(path) {
   out$HOURS_RECORDED <- hours_rec
   out$SCORED <- !is.na(out$DETECTED)
 
-  attr(out, "pam_mapping") <- data.frame(
-    standardized = names(matched), original = unlist(matched),
+  # A date that was written down and could not be read is reported, not
+  # dropped: the row keeps its station and its detection, and the Source tab
+  # says how many such rows there are and what the first of them said.
+  placed <- !is.na(out$LATITUDE) & !is.na(out$LONGITUDE)
+  bad <- placed & !is.na(given) & nzchar(given) & is.na(out$DATE)
+  mapping <- data.frame(
+    standardized = names(matched), original = unname(unlist(matched)),
     row.names = NULL, stringsAsFactors = FALSE
   )
-  out[!is.na(out$LATITUDE) & !is.na(out$LONGITUDE), , drop = FALSE]
+  if (any(bad)) {
+    mapping <- rbind(mapping, data.frame(
+      standardized = "DATE not read",
+      original = paste0(fmt_int(sum(bad)), " rows, e.g. \"",
+                        given[bad][1], "\""),
+      stringsAsFactors = FALSE
+    ))
+  }
+  out <- out[placed, , drop = FALSE]
+  attr(out, "pam_mapping") <- mapping
+  out
 }
 
 # One row per station over the selected period. Recording effort is the
@@ -836,7 +905,11 @@ if (is.character(start_pam)) {
   start_pam_label <- start_pam
   start_pam <- read_pam(start_pam)
 } else if (!is.null(start_pam)) {
+  # A table is matched by the same loose reader a file is. Passed through as
+  # it came, a data frame with `site` and `lat` columns reached
+  # `pam_summary()` with no STATION to group by and failed there.
   start_pam_label <- "supplied to run_narwc_app()"
+  start_pam <- normalise_pam(start_pam)
 }
 
 # --------------------------------------------------------------------- ui ----
@@ -1188,6 +1261,9 @@ server <- function(input, output, session) {
   controls_ready <- reactiveVal(FALSE)
   species_ready <- reactiveVal(FALSE)
 
+  # The types the data-type control offered when it was last drawn.
+  types_offered <- character(0)
+
   output$type_control <- renderUI({
     controls_ready(TRUE)
     present <- levels(droplevels(prepared()$DATATYPE))
@@ -1223,8 +1299,17 @@ server <- function(input, output, session) {
       labels <- c(labels, list(swatch("PAM", length(unique(pam()$STATION)))))
       values <- c(values, "PAM")
     }
+    # Redrawn whenever the data or the acoustic file changes, and a redraw is
+    # not a reason to undo what the user unticked. A type this control has
+    # not offered before - PAM, the moment a file is loaded - arrives ticked,
+    # because a layer that loads switched off reads as a load that failed.
+    selected <- if (!isolate(reported$types)) values else {
+      union(intersect(isolate(input$types) %||% character(0), values),
+            setdiff(values, types_offered))
+    }
+    types_offered <<- values
     checkboxGroupInput("types", NULL, choiceNames = labels,
-                       choiceValues = values, selected = values)
+                       choiceValues = values, selected = selected)
   })
 
   output$date_control <- renderUI({
@@ -1248,14 +1333,42 @@ server <- function(input, output, session) {
     if (!length(d)) NULL else range(d)
   })
 
+  # The date window actually in force. The slider is only on the page when
+  # the data span more than one day; replaced by a line of text, it leaves its
+  # last range behind in `input$dates`, and a range from the previous file
+  # filters every record of this one out. So the range applies only while the
+  # slider is shown and only where it overlaps the data now loaded.
+  date_window <- reactive({
+    d <- input$dates
+    r <- period_range()
+    if (is.null(d) || is.null(r) || r[1] == r[2]) return(NULL)
+    d <- as.Date(d)
+    if (d[2] < r[1] || d[1] > r[2]) return(NULL)
+    d
+  })
+
   # A selection the user made themselves is kept where it still applies, so
   # that switching a data type off does not silently re-tick every species
   # they had narrowed down to.
-  keep_selected <- function(previous, available) {
-    if (is.null(previous)) return(available)
+  #
+  # `reported` says whether the control has ever sent a value back. Before it
+  # has, NULL is a control that has not rendered yet and every choice is
+  # ticked; after, NULL is a selection the user emptied, and it stays empty
+  # when an upstream control redraws this one. Read the other way, clearing
+  # every species and then moving the data type re-ticked all of them.
+  keep_selected <- function(previous, available, reported = TRUE) {
+    if (!reported) return(available)
+    if (!length(previous)) return(character(0))
     still <- intersect(previous, available)
     if (length(still)) still else available
   }
+
+  # Whether each control has sent a value yet. Set once, by the first
+  # non-NULL value; the user cannot send one before the control exists.
+  reported <- reactiveValues(types = FALSE, species = FALSE, idrel = FALSE)
+  observeEvent(input$types, reported$types <- TRUE, once = TRUE)
+  observeEvent(input$species, reported$species <- TRUE, once = TRUE)
+  observeEvent(input$idrel, reported$idrel <- TRUE, once = TRUE)
 
   # The species there are to choose from, so that "none chosen" can be told
   # apart from "nothing to choose".
@@ -1280,7 +1393,8 @@ server <- function(input, output, session) {
     selectizeInput(
       "species", "Species", multiple = TRUE,
       choices = stats::setNames(codes, species_label(codes)),
-      selected = keep_selected(isolate(input$species), codes),
+      selected = keep_selected(isolate(input$species), codes,
+                               isolate(reported$species)),
       options = list(plugins = list("remove_button"))
     )
   })
@@ -1293,7 +1407,8 @@ server <- function(input, output, session) {
       choices = stats::setNames(
         codes, vapply(codes, function(k) code_meaning("IDREL", k), character(1))
       ),
-      selected = keep_selected(isolate(input$idrel), codes)
+      selected = keep_selected(isolate(input$idrel), codes,
+                               isolate(reported$idrel))
     )
   })
 
@@ -1321,9 +1436,10 @@ server <- function(input, output, session) {
   in_period <- reactive({
     dat <- in_types()
     keep <- rep(TRUE, nrow(dat))
-    if (!is.null(input$dates)) {
+    window <- date_window()
+    if (!is.null(window)) {
       keep <- keep & !is.na(dat$DATE) &
-        dat$DATE >= input$dates[1] & dat$DATE <= input$dates[2]
+        dat$DATE >= window[1] & dat$DATE <= window[2]
     }
     # `all` and `none` are both offered under the month boxes, and `none` has
     # to mean none.
@@ -1390,7 +1506,11 @@ server <- function(input, output, session) {
 
   effort_track <- reactive({
     dat <- mappable()
-    dat[dat$OnOff.Effort == 1L, , drop = FALSE]
+    # A run of consecutive on-effort records. An off-effort stretch inside one
+    # track ends a run, so track_km() does not count the distance across it.
+    on <- dat$OnOff.Effort == 1L
+    dat$EFFRUN <- cumsum(c(TRUE, on[-1] & !on[-length(on)]))[seq_along(on)]
+    dat[on, , drop = FALSE]
   })
 
   ferry_track <- reactive({
@@ -1401,7 +1521,11 @@ server <- function(input, output, session) {
   selected_pam_all <- reactive({
     dat <- pam()
     if (is.null(dat)) return(NULL)
-    if (!is.null(input$types) && !"PAM" %in% input$types) return(NULL)
+    # The same rule as `in_types()`: nothing ticked is nothing drawn, and only
+    # a control that has not rendered yet is read as "no filter".
+    if (controls_ready() && !"PAM" %in% (input$types %||% character(0))) {
+      return(NULL)
+    }
     dat
   })
 
@@ -1409,9 +1533,10 @@ server <- function(input, output, session) {
     dat <- selected_pam_all()
     if (is.null(dat)) return(NULL)
     keep <- rep(TRUE, nrow(dat))
-    if (!is.null(input$dates)) {
+    window <- date_window()
+    if (!is.null(window)) {
       keep <- keep & !is.na(dat$DATE) &
-        dat$DATE >= input$dates[1] & dat$DATE <= input$dates[2]
+        dat$DATE >= window[1] & dat$DATE <= window[2]
     }
     if (controls_ready()) {
       months <- as.integer(input$months %||% character(0))
@@ -1494,7 +1619,10 @@ server <- function(input, output, session) {
   bathy_contours <- reactive({
     b <- bathy_grid()
     if (is.null(b)) return(NULL)
-    depths <- as.numeric(input$contour_depths %||% default_depths)
+    # Read as sent. The control is in the page from the start, initialised to
+    # `default_depths`, so a NULL here is a selection the reader cleared - and
+    # falling back to the defaults would draw three contours nobody asked for.
+    depths <- as.numeric(input$contour_depths)
     if (!length(depths)) return(NULL)
     depth_contours(b, depths)
   })
@@ -1510,12 +1638,13 @@ server <- function(input, output, session) {
     if (is.null(b)) return(NULL)
     ext <- data_extent()
     cs <- bathy_contours()
-    asked <- as.numeric(input$contour_depths %||% default_depths)
+    asked <- as.numeric(input$contour_depths)
     drawn_depths <- as.numeric(names(cs %||% list()))
     missing <- setdiff(asked, drawn_depths)
     helpText(
       sprintf("Grid %d x %d over %.1f to %.1f E, %.1f to %.1f N.",
               nrow(b), ncol(b), ext$x1, ext$x2, ext$y1, ext$y2),
+      if (!length(asked)) " No contour depths are chosen, so none are drawn.",
       if (length(missing)) {
         # A depth the grid never reaches is not a depth that failed to draw.
         sprintf(" No %s m contour: the seafloor here never gets that deep.",
@@ -1660,7 +1789,8 @@ server <- function(input, output, session) {
       map, lng = dat$LONGITUDE, lat = dat$LATITUDE, group = "Sightings",
       radius = radius, color = "#2b2b2b", weight = 0.7, opacity = 0.9,
       fillColor = groups$fill, fillOpacity = 0.85,
-      popup = sighting_popups(dat, bathy = bathy_grid()),
+      popup = sighting_popups(dat, bathy = bathy_grid(),
+                              min_vis = effort_args()$min_visibility_nmi),
       label = species_label(dat$SPECCODE),
       clusterOptions = cluster
     )
@@ -1845,9 +1975,10 @@ server <- function(input, output, session) {
       notes <- c(notes, sprintf(
         paste("%s of the %s positions in this selection are off effort and are",
               "not drawn, so there is no trackline under the sightings made",
-              "on them. Tick \"Draw transit and off-effort track\" to see where",
-              "the platform went, and \"Why records are off effort\" on the",
-              "Summary tab for which criterion put them there."),
+              "on them. Set \"Track to draw\" under Effort to \"everywhere",
+              "the platform went\" to see where it went, and \"Why records",
+              "are off effort\" on the Summary tab for which criterion put",
+              "them there."),
         fmt_int(off), fmt_int(total)))
     }
     inferred <- sum(in_period()$TYPESOURCE == "speed")
@@ -1878,11 +2009,14 @@ server <- function(input, output, session) {
 
   output$by_year <- renderTable({
     dat <- in_period()
-    if (!nrow(dat)) return(NULL)
     sight <- selected_sightings()
     eff <- effort_track()
     st <- selected_pam()
-    years <- sort(unique(stats::na.omit(dat$YEAR)))
+    has_pam <- !is.null(st) && nrow(st) > 0L
+    # A year a recorder listened through and nobody flew is a row of this
+    # table, not a gap in it: that winter is what the acoustic layer is for.
+    years <- sort(unique(stats::na.omit(c(dat$YEAR, if (has_pam) st$YEAR))))
+    if (!length(years)) return(NULL)
     out <- data.frame(
       Year = as.integer(years),
       Days = vapply(years, function(y)
@@ -1901,7 +2035,7 @@ server <- function(input, output, session) {
             na.rm = TRUE), numeric(1)),
       check.names = FALSE
     )
-    if (!is.null(st) && nrow(st)) {
+    if (has_pam) {
       out$`Station-days` <- vapply(years, function(y)
         sum(st$YEAR == y & st$SCORED, na.rm = TRUE), integer(1))
     }
@@ -2051,8 +2185,13 @@ server <- function(input, output, session) {
   output$download <- downloadHandler(
     filename = function() paste0("narwc-sightings-", Sys.Date(), ".csv"),
     content = function(file) {
-      utils::write.csv(as.data.frame(selected_sightings()), file,
-                       row.names = FALSE, na = "")
+      # TRACK is the app's own drawing key, a file id and a date joined with
+      # carriage returns, and means nothing outside this page. Everything else
+      # - LEGNO3, DATATYPE and where it came from, OnOff.Effort - is a
+      # finding about the record and goes out with it.
+      out <- as.data.frame(selected_sightings())
+      out$TRACK <- NULL
+      utils::write.csv(out, file, row.names = FALSE, na = "")
     }
   )
 }
